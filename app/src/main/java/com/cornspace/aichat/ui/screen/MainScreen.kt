@@ -24,6 +24,9 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.unit.dp
 import androidx.core.content.ContextCompat
 import androidx.hilt.navigation.compose.hiltViewModel
+import androidx.lifecycle.Lifecycle
+import androidx.lifecycle.LifecycleEventObserver
+import androidx.compose.ui.platform.LocalLifecycleOwner
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.cornspace.aichat.ui.screen.components.*
 import com.cornspace.aichat.ui.viewmodel.MainViewModel
@@ -35,8 +38,8 @@ fun MainScreen(
 ) {
     val uiState by viewModel.uiState.collectAsStateWithLifecycle()
     val context = LocalContext.current
+    val lifecycleOwner = LocalLifecycleOwner.current
 
-    var serverUrlInput by remember(uiState.serverUrl) { mutableStateOf(uiState.serverUrl) }
     var showSettings by remember { mutableStateOf(false) }
 
     val requiredPermissions = remember {
@@ -66,22 +69,44 @@ fun MainScreen(
         )
     }
 
+    var isBatteryOptimized by remember {
+        mutableStateOf(isBatteryOptimizationEnabled(context))
+    }
+
+    // Re-check permissions and battery status every time user returns to screen
+    DisposableEffect(lifecycleOwner) {
+        val observer = LifecycleEventObserver { _, event ->
+            if (event == Lifecycle.Event.ON_RESUME) {
+                isBatteryOptimized = isBatteryOptimizationEnabled(context)
+                hasAllPermissions = requiredPermissions.all {
+                    ContextCompat.checkSelfPermission(context, it) == PackageManager.PERMISSION_GRANTED
+                }
+            }
+        }
+        lifecycleOwner.lifecycle.addObserver(observer)
+        onDispose { lifecycleOwner.lifecycle.removeObserver(observer) }
+    }
+
     val permissionLauncher = rememberLauncherForActivityResult(
         contract = ActivityResultContracts.RequestMultiplePermissions()
     ) { permissions ->
         hasAllPermissions = permissions.values.all { it }
         if (hasAllPermissions) {
             viewModel.loadDeviceInfo()
-            // Request battery optimization after permissions granted
-            requestBatteryOptimization(context)
+            // Battery optimization is handled by LaunchedEffect(hasAllPermissions) below
         }
     }
 
-    LaunchedEffect(hasAllPermissions) {
+    // Step 1: Request permissions once on first launch
+    LaunchedEffect(Unit) {
         if (!hasAllPermissions) {
             permissionLauncher.launch(requiredPermissions)
-        } else {
-            // Already has permissions, still check battery optimization
+        }
+    }
+
+    // Step 2: Request battery optimization only AFTER permissions are granted
+    LaunchedEffect(hasAllPermissions) {
+        if (hasAllPermissions) {
             requestBatteryOptimization(context)
         }
     }
@@ -91,7 +116,7 @@ fun MainScreen(
             TopAppBar(
                 title = {
                     Text(
-                        text = "SMS Gateway",
+                        text = "AI Chat",
                         fontWeight = FontWeight.Bold
                     )
                 },
@@ -118,38 +143,58 @@ fun MainScreen(
                 .verticalScroll(rememberScrollState()),
             verticalArrangement = Arrangement.spacedBy(16.dp)
         ) {
+
+            // Battery optimization warning — shows if not exempted
+            if (isBatteryOptimized) {
+                Card(
+                    colors = CardDefaults.cardColors(
+                        containerColor = MaterialTheme.colorScheme.errorContainer
+                    )
+                ) {
+                    Row(
+                        modifier = Modifier
+                            .fillMaxWidth()
+                            .padding(12.dp),
+                        verticalAlignment = Alignment.CenterVertically,
+                        horizontalArrangement = Arrangement.SpaceBetween
+                    ) {
+                        Row(
+                            horizontalArrangement = Arrangement.spacedBy(8.dp),
+                            verticalAlignment = Alignment.CenterVertically,
+                            modifier = Modifier.weight(1f)
+                        ) {
+                            Icon(
+                                imageVector = Icons.Default.Warning,
+                                contentDescription = null,
+                                tint = MaterialTheme.colorScheme.error
+                            )
+                            Column {
+                                Text(
+                                    text = "Battery optimization is ON",
+                                    style = MaterialTheme.typography.labelMedium,
+                                    fontWeight = FontWeight.Bold,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                                Text(
+                                    text = "Service will die when screen turns off",
+                                    style = MaterialTheme.typography.bodySmall,
+                                    color = MaterialTheme.colorScheme.onErrorContainer
+                                )
+                            }
+                        }
+                        TextButton(onClick = { requestBatteryOptimization(context) }) {
+                            Text("Fix Now")
+                        }
+                    }
+                }
+            }
+
             // Status Card
             StatusCard(
                 isServiceRunning = uiState.isServiceRunning,
                 connectionState = uiState.connectionState,
                 smsCount = uiState.smsCount
             )
-
-            // // Server URL Input
-            // OutlinedTextField(
-            //     value = serverUrlInput,
-            //     onValueChange = { serverUrlInput = it },
-            //     label = { Text("Server URL") },
-            //     placeholder = { Text("https://your-server.com") },
-            //     modifier = Modifier.fillMaxWidth(),
-            //     leadingIcon = {
-            //         Icon(
-            //             imageVector = Icons.Default.Cloud,
-            //             contentDescription = null
-            //         )
-            //     },
-            //     trailingIcon = {
-            //         IconButton(onClick = {
-            //             viewModel.setServerUrl(serverUrlInput)
-            //         }) {
-            //             Icon(
-            //                 imageVector = Icons.Default.Save,
-            //                 contentDescription = "Save"
-            //             )
-            //         }
-            //     },
-            //     singleLine = true
-            // )
 
             // Action Buttons
             ActionButtons(
@@ -218,21 +263,25 @@ fun MainScreen(
         }
     }
 
-    // // Settings Dialog
-    // if (showSettings) {
-    //     SettingsDialog(
-    //         serverUrl = uiState.serverUrl,
-    //         deviceId = uiState.deviceId,
-    //         onDismiss = { showSettings = false },
-    //         onSaveServerUrl = { url ->
-    //             viewModel.setServerUrl(url)
-    //             showSettings = false
-    //         }
-    //     )
-    // }
+    if (showSettings) {
+        SettingsDialog(
+            serverUrl = uiState.serverUrl,
+            deviceId = uiState.deviceId,
+            onDismiss = { showSettings = false },
+            onSaveServerUrl = { url ->
+                viewModel.setServerUrl(url)
+                showSettings = false
+            }
+        )
+    }
 }
 
-// Battery optimization helper
+// Returns true if battery optimization is STILL enabled (bad)
+private fun isBatteryOptimizationEnabled(context: Context): Boolean {
+    val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
+    return !pm.isIgnoringBatteryOptimizations(context.packageName)
+}
+
 private fun requestBatteryOptimization(context: Context) {
     try {
         val pm = context.getSystemService(Context.POWER_SERVICE) as PowerManager
@@ -244,7 +293,7 @@ private fun requestBatteryOptimization(context: Context) {
             context.startActivity(intent)
         }
     } catch (e: Exception) {
-        // Some devices may not support this
+        // Some devices may not support this intent
     }
 }
 
@@ -261,18 +310,15 @@ fun SettingsDialog(
         onDismissRequest = onDismiss,
         title = { Text("Settings") },
         text = {
-            Column(
-                verticalArrangement = Arrangement.spacedBy(16.dp)
-            ) {
+            Column(verticalArrangement = Arrangement.spacedBy(16.dp)) {
                 OutlinedTextField(
                     value = urlInput,
                     onValueChange = { urlInput = it },
                     label = { Text("Server URL") },
-                    placeholder = { Text("https://your-server.com") },
+                    placeholder = { Text("wss://your-server.com/ws") },
                     modifier = Modifier.fillMaxWidth(),
                     singleLine = true
                 )
-
                 OutlinedTextField(
                     value = deviceId,
                     onValueChange = { },

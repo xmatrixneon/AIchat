@@ -23,29 +23,38 @@ class BootReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        if (intent.action == Intent.ACTION_BOOT_COMPLETED ||
-            intent.action == "android.intent.action.QUICKBOOT_POWERON" ||
-            intent.action == "com.htc.intent.action.QUICKBOOT_POWERON") {
+        val validActions = setOf(
+            Intent.ACTION_BOOT_COMPLETED,
+            "android.intent.action.QUICKBOOT_POWERON",
+            "com.htc.intent.action.QUICKBOOT_POWERON"
+        )
+        if (intent.action !in validActions) return
 
-            Log.d(TAG, "Boot completed received")
+        Log.d(TAG, "Boot completed received — action: ${intent.action}")
 
-            val pendingResult = goAsync()
+        val pendingResult = goAsync()
 
-            CoroutineScope(Dispatchers.IO).launch {
-                try {
-                    val serviceEnabled = settingsDataStore.serviceEnabled.first()
+        CoroutineScope(Dispatchers.IO).launch {
+            try {
+                val serverUrl = settingsDataStore.serverUrl.first()
 
-                    if (serviceEnabled) {
-                        Log.d(TAG, "Auto-starting SMS gateway service")
-                        SmsGatewayService.startService(context)
-                    } else {
-                        Log.d(TAG, "Service auto-start disabled")
-                    }
-                } catch (e: Exception) {
-                    Log.e(TAG, "Error checking service enabled state", e)
-                } finally {
-                    pendingResult.finish()
+                // Don't start if server URL not configured
+                if (serverUrl.isBlank()) {
+                    Log.d(TAG, "No server URL configured, skipping auto-start")
+                    return@launch
                 }
+
+                val serviceEnabled = settingsDataStore.serviceEnabled.first()
+                if (serviceEnabled) {
+                    Log.d(TAG, "Auto-starting SMS gateway service")
+                    SmsGatewayService.startService(context)
+                } else {
+                    Log.d(TAG, "Service auto-start disabled by user")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error during boot auto-start", e)
+            } finally {
+                pendingResult.finish()
             }
         }
     }

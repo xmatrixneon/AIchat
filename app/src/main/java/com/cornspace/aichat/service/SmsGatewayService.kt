@@ -4,6 +4,10 @@ import android.app.Notification
 import android.app.PendingIntent
 import android.content.Context
 import android.content.Intent
+import android.net.ConnectivityManager
+import android.net.Network
+import android.net.NetworkCapabilities
+import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
@@ -31,12 +35,13 @@ class SmsGatewayService : android.app.Service() {
     lateinit var webSocketClient: WebSocketClient
 
     private var wakeLock: PowerManager.WakeLock? = null
+    private var networkCallback: ConnectivityManager.NetworkCallback? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-    private var smsForwardedCount = 0
-    private var serviceStartTime = 0L
 
     companion object {
         private const val TAG = "SmsGatewayService"
+
+        @Volatile
         private var isRunning = false
 
         fun startService(context: Context) {
@@ -49,8 +54,7 @@ class SmsGatewayService : android.app.Service() {
         }
 
         fun stopService(context: Context) {
-            val intent = Intent(context, SmsGatewayService::class.java)
-            context.stopService(intent)
+            context.stopService(Intent(context, SmsGatewayService::class.java))
         }
 
         fun isServiceRunning(): Boolean = isRunning
@@ -59,24 +63,19 @@ class SmsGatewayService : android.app.Service() {
     override fun onCreate() {
         super.onCreate()
         Log.d(TAG, "Service created")
-
-        serviceStartTime = System.currentTimeMillis()
         isRunning = true
-
         acquireWakeLock()
         createNotificationChannel()
+        registerNetworkCallback()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service started")
 
-        // Start foreground immediately
         startForeground(Constants.NOTIFICATION_ID, createNotification())
 
-        // Handle incoming SMS data from receiver
         intent?.let { handleIntent(it) }
 
-        // Connect WebSocket if not connected
         if (!webSocketClient.isConnected()) {
             connectWebSocket()
         }
@@ -89,20 +88,14 @@ class SmsGatewayService : android.app.Service() {
         val message = intent.getStringExtra("sms_message")
 
         if (sender != null && message != null) {
-            val timestamp = intent.getLongExtra("sms_timestamp", System.currentTimeMillis())
-            val simSlot = intent.getIntExtra("sms_sim_slot", 0)
-            val receiverNumber = intent.getStringExtra("sms_receiver_number")
-            val simCarrier = intent.getStringExtra("sim_carrier")
-            val simNetworkType = intent.getStringExtra("sim_network_type")
-
             handleIncomingSms(
                 sender = sender,
                 message = message,
-                timestamp = timestamp,
-                simSlot = simSlot,
-                receiverNumber = receiverNumber,
-                simCarrier = simCarrier,
-                simNetworkType = simNetworkType
+                timestamp = intent.getLongExtra("sms_timestamp", System.currentTimeMillis()),
+                simSlot = intent.getIntExtra("sms_sim_slot", 0),
+                receiverNumber = intent.getStringExtra("sms_receiver_number"),
+                simCarrier = intent.getStringExtra("sim_carrier"),
+                simNetworkType = intent.getStringExtra("sim_network_type")
             )
         }
     }
@@ -112,34 +105,90 @@ class SmsGatewayService : android.app.Service() {
     override fun onDestroy() {
         super.onDestroy()
         Log.d(TAG, "Service destroyed")
-
         isRunning = false
-        webSocketClient.disconnect()
+        unregisterNetworkCallback()
+        webSocketClient.destroy()
         serviceScope.cancel()
         releaseWakeLock()
     }
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        Log.d(TAG, "Task removed, restarting service")
-
-        // Restart service
-        val restartIntent = Intent(applicationContext, SmsGatewayService::class.java)
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            startForegroundService(restartIntent)
-        } else {
-            startService(restartIntent)
+        Log.d(TAG, "Task removed — checking if should restart")
+        serviceScope.launch {
+            val serviceEnabled = settingsDataStore.serviceEnabled.first()
+            val serverUrl = settingsDataStore.serverUrl.first()
+            if (serviceEnabled && serverUrl.isNotBlank()) {
+                startService(applicationContext)
+            }
         }
     }
 
+    // ─── Network Callback — instant reconnect ─────────────────────────────────
+
+    private fun registerNetworkCallback() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+
+            val request = NetworkRequest.Builder()
+                .addCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                .build()
+
+            networkCallback = object : ConnectivityManager.NetworkCallback() {
+
+                override fun onAvailable(network: Network) {
+                    Log.d(TAG, "Network available — reconnecting immediately")
+                    if (!webSocketClient.isConnected()) {
+                        connectWebSocket()
+                    }
+                }
+
+                override fun onLost(network: Network) {
+                    Log.d(TAG, "Network lost")
+                }
+
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    capabilities: NetworkCapabilities
+                ) {
+                    val hasInternet = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET)
+                    val isValidated = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                    if (hasInternet && isValidated && !webSocketClient.isConnected()) {
+                        Log.d(TAG, "Network fully validated — reconnecting")
+                        connectWebSocket()
+                    }
+                }
+            }
+
+            cm.registerNetworkCallback(request, networkCallback!!)
+            Log.d(TAG, "Network callback registered")
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering network callback", e)
+        }
+    }
+
+    private fun unregisterNetworkCallback() {
+        try {
+            val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
+            networkCallback?.let { cm.unregisterNetworkCallback(it) }
+            networkCallback = null
+            Log.d(TAG, "Network callback unregistered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering network callback", e)
+        }
+    }
+
+    // ─── Wake Lock ────────────────────────────────────────────────────────────
+
     private fun acquireWakeLock() {
         try {
-            val powerManager = getSystemService(Context.POWER_SERVICE) as PowerManager
-            wakeLock = powerManager.newWakeLock(
+            val pm = getSystemService(Context.POWER_SERVICE) as PowerManager
+            wakeLock = pm.newWakeLock(
                 PowerManager.PARTIAL_WAKE_LOCK,
                 "AIChat::SmsGatewayWakeLock"
             ).apply {
-                acquire(10 * 60 * 1000L) // 10 minutes
+                acquire()
             }
             Log.d(TAG, "Wake lock acquired")
         } catch (e: Exception) {
@@ -160,43 +209,41 @@ class SmsGatewayService : android.app.Service() {
         }
     }
 
+    // ─── Notification ─────────────────────────────────────────────────────────
+
     private fun createNotificationChannel() {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
             val channel = android.app.NotificationChannel(
                 Constants.NOTIFICATION_CHANNEL_ID,
-                "SMS Gateway Service",
+                "AI Chat",
                 android.app.NotificationManager.IMPORTANCE_LOW
             ).apply {
-                description = "Keeps SMS Gateway running in background"
+                description = "Keeps AI Chat running in background"
                 setShowBadge(false)
             }
-
-            val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-            notificationManager.createNotificationChannel(channel)
+            val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+            nm.createNotificationChannel(channel)
         }
     }
 
     private fun createNotification(): Notification {
-        val intent = Intent(this, MainActivity::class.java).apply {
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-        }
-
         val pendingIntent = PendingIntent.getActivity(
-            this,
-            0,
-            intent,
+            this, 0,
+            Intent(this, MainActivity::class.java).apply {
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
+            },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
 
-        val uptimeMinutes = (System.currentTimeMillis() - serviceStartTime) / 1000 / 60
-        val statusText = buildString {
-            append("Active")
-            if (smsForwardedCount > 0) append(" • $smsForwardedCount SMS forwarded")
-            if (uptimeMinutes > 0) append(" • ${uptimeMinutes}m uptime")
+        val statusText = when (webSocketClient.connectionState.value) {
+            is ConnectionState.Connected    -> "Connected ✓"
+            is ConnectionState.Connecting   -> "Connecting…"
+            is ConnectionState.Disconnected -> "Disconnected"
+            is ConnectionState.Error        -> "Reconnecting…"
         }
 
         return androidx.core.app.NotificationCompat.Builder(this, Constants.NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("SMS Gateway")
+            .setContentTitle("AI Chat")
             .setContentText(statusText)
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
@@ -208,15 +255,16 @@ class SmsGatewayService : android.app.Service() {
     }
 
     private fun updateNotification() {
-        val notificationManager = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
-        notificationManager.notify(Constants.NOTIFICATION_ID, createNotification())
+        val nm = getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager
+        nm.notify(Constants.NOTIFICATION_ID, createNotification())
     }
+
+    // ─── WebSocket ────────────────────────────────────────────────────────────
 
     private fun connectWebSocket() {
         serviceScope.launch {
             try {
                 val serverUrl = settingsDataStore.serverUrl.first()
-
                 if (serverUrl.isBlank()) {
                     Log.w(TAG, "Server URL not configured")
                     return@launch
@@ -227,14 +275,9 @@ class SmsGatewayService : android.app.Service() {
                 webSocketClient.connect(
                     serverUrl = serverUrl,
                     deviceInfo = deviceInfo,
-                    onMessageReceived = { message ->
-                        handleWebSocketMessage(message)
-                    },
-                    onConnectionStateChanged = { state ->
-                        handleConnectionStateChange(state)
-                    }
+                    onMessageReceived = { handleWebSocketMessage(it) },
+                    onConnectionStateChanged = { handleConnectionStateChange(it) }
                 )
-
             } catch (e: Exception) {
                 Log.e(TAG, "Error connecting WebSocket", e)
             }
@@ -244,10 +287,10 @@ class SmsGatewayService : android.app.Service() {
     private fun handleWebSocketMessage(message: WebSocketMessage) {
         when (message) {
             is WebSocketMessage.Connected -> {
-                Log.d(TAG, "Connected to server: ${message.connectionId}")
+                Log.d(TAG, "Connected: ${message.connectionId}")
             }
             is WebSocketMessage.Registered -> {
-                Log.d(TAG, "Device registered: ${message.deviceId}")
+                Log.d(TAG, "Registered: ${message.deviceId}")
                 serviceScope.launch {
                     settingsDataStore.setDeviceId(message.deviceId)
                 }
@@ -256,14 +299,12 @@ class SmsGatewayService : android.app.Service() {
                 webSocketClient.send(WebSocketMessage.Pong(message.timestamp))
             }
             is WebSocketMessage.Ack -> {
-                Log.d(TAG, "Message acknowledged: ${message.messageId}")
+                Log.d(TAG, "Ack: ${message.messageId}")
             }
             is WebSocketMessage.Error -> {
                 Log.e(TAG, "Server error: ${message.code} - ${message.message}")
             }
-            else -> {
-                Log.d(TAG, "Unknown message type: ${message.type}")
-            }
+            else -> Log.d(TAG, "Unknown message: ${message.type}")
         }
     }
 
@@ -271,6 +312,8 @@ class SmsGatewayService : android.app.Service() {
         Log.d(TAG, "Connection state: $state")
         updateNotification()
     }
+
+    // ─── SMS Handling ─────────────────────────────────────────────────────────
 
     private fun handleIncomingSms(
         sender: String,
@@ -287,7 +330,6 @@ class SmsGatewayService : android.app.Service() {
 
                 val deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
                 val deviceId = settingsDataStore.deviceId.first()
-
                 val networkType = when {
                     deviceInfo.networkInfo.networkType.contains("WiFi", ignoreCase = true) -> "wifi"
                     deviceInfo.networkInfo.networkType.contains("Mobile", ignoreCase = true) -> "mobile"
@@ -306,13 +348,11 @@ class SmsGatewayService : android.app.Service() {
                     networkType = networkType
                 )
 
-                smsForwardedCount++
                 updateNotification()
-
-                Log.d(TAG, "SMS forwarded successfully (total: $smsForwardedCount)")
+                Log.d(TAG, "SMS forwarded (total: ${webSocketClient.getSmsForwardedCount()})")
 
             } catch (e: Exception) {
-                Log.e(TAG, "Error handling incoming SMS", e)
+                Log.e(TAG, "Error handling SMS", e)
             }
         }
     }
