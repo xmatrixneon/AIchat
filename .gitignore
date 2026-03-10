@@ -1,0 +1,41 @@
+# ─── Node.js / Next.js ───────────────────────────────────────
+server/node_modules/
+server/.next/
+server/.env
+server/.env.local
+server/.env.production
+server/.env*.local
+
+# Next.js build output
+server/.vercel
+server/out/
+
+# Logs
+server/logs/
+*.log
+npm-debug.log*
+
+# ─── Android ─────────────────────────────────────────────────
+*.iml
+.gradle/
+local.properties
+app/.cxx/
+app/build/
+build/
+.idea/
+*.keystore
+!debug.keystore
+captures/
+.externalNativeBuild/
+.cxx/
+*.apk
+*.aab
+
+# ─── OS ──────────────────────────────────────────────────────
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# ─── Uploads / Public ────────────────────────────────────────
+server/public/uploads/*
+!server/public/uploads/.gitkeep
