@@ -6,6 +6,7 @@ import androidx.lifecycle.viewModelScope
 import com.cornspace.aichat.data.local.SettingsDataStore
 import com.cornspace.aichat.data.model.DeviceInfo
 import com.cornspace.aichat.data.remote.ConnectionState
+import com.cornspace.aichat.data.remote.WebSocketClient
 import com.cornspace.aichat.service.SmsGatewayService
 import com.cornspace.aichat.util.DeviceUtils
 import dagger.hilt.android.lifecycle.HiltViewModel
@@ -29,7 +30,8 @@ data class MainUiState(
 @HiltViewModel
 class MainViewModel @Inject constructor(
     @ApplicationContext private val context: Context,
-    private val settingsDataStore: SettingsDataStore
+    private val settingsDataStore: SettingsDataStore,
+    private val webSocketClient: WebSocketClient  // ✅ injected to observe real state
 ) : ViewModel() {
 
     private val _uiState = MutableStateFlow(MainUiState())
@@ -37,7 +39,17 @@ class MainViewModel @Inject constructor(
 
     init {
         observeSettings()
+        observeConnectionState()  // ✅ wire WebSocket state into UI
         loadDeviceInfo()
+    }
+
+    // ✅ NEW: Collect the real WebSocket connection state into UI state
+    private fun observeConnectionState() {
+        viewModelScope.launch {
+            webSocketClient.connectionState.collect { connectionState ->
+                _uiState.update { it.copy(connectionState = connectionState) }
+            }
+        }
     }
 
     private fun observeSettings() {
@@ -53,6 +65,7 @@ class MainViewModel @Inject constructor(
                     state.copy(
                         deviceId = deviceId,
                         serverUrl = serverUrl,
+                        // ✅ rely on actual service state, not stale datastore flag
                         isServiceRunning = serviceEnabled || SmsGatewayService.isServiceRunning()
                     )
                 }

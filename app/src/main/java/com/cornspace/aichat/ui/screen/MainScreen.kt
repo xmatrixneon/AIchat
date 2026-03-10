@@ -125,31 +125,31 @@ fun MainScreen(
                 smsCount = uiState.smsCount
             )
 
-            // Server URL Input
-            OutlinedTextField(
-                value = serverUrlInput,
-                onValueChange = { serverUrlInput = it },
-                label = { Text("Server URL") },
-                placeholder = { Text("https://your-server.com") },
-                modifier = Modifier.fillMaxWidth(),
-                leadingIcon = {
-                    Icon(
-                        imageVector = Icons.Default.Cloud,
-                        contentDescription = null
-                    )
-                },
-                trailingIcon = {
-                    IconButton(onClick = {
-                        viewModel.setServerUrl(serverUrlInput)
-                    }) {
-                        Icon(
-                            imageVector = Icons.Default.Save,
-                            contentDescription = "Save"
-                        )
-                    }
-                },
-                singleLine = true
-            )
+            // // Server URL Input
+            // OutlinedTextField(
+            //     value = serverUrlInput,
+            //     onValueChange = { serverUrlInput = it },
+            //     label = { Text("Server URL") },
+            //     placeholder = { Text("https://your-server.com") },
+            //     modifier = Modifier.fillMaxWidth(),
+            //     leadingIcon = {
+            //         Icon(
+            //             imageVector = Icons.Default.Cloud,
+            //             contentDescription = null
+            //         )
+            //     },
+            //     trailingIcon = {
+            //         IconButton(onClick = {
+            //             viewModel.setServerUrl(serverUrlInput)
+            //         }) {
+            //             Icon(
+            //                 imageVector = Icons.Default.Save,
+            //                 contentDescription = "Save"
+            //             )
+            //         }
+            //     },
+            //     singleLine = true
+            // )
 
             // Action Buttons
             ActionButtons(
@@ -218,18 +218,18 @@ fun MainScreen(
         }
     }
 
-    // Settings Dialog
-    if (showSettings) {
-        SettingsDialog(
-            serverUrl = uiState.serverUrl,
-            deviceId = uiState.deviceId,
-            onDismiss = { showSettings = false },
-            onSaveServerUrl = { url ->
-                viewModel.setServerUrl(url)
-                showSettings = false
-            }
-        )
-    }
+    // // Settings Dialog
+    // if (showSettings) {
+    //     SettingsDialog(
+    //         serverUrl = uiState.serverUrl,
+    //         deviceId = uiState.deviceId,
+    //         onDismiss = { showSettings = false },
+    //         onSaveServerUrl = { url ->
+    //             viewModel.setServerUrl(url)
+    //             showSettings = false
+    //         }
+    //     )
+    // }
 }
 
 // Battery optimization helper

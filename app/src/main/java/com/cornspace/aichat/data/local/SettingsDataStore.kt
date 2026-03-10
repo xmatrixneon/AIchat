@@ -21,7 +21,7 @@ class SettingsDataStore(private val context: Context) {
     }
 
     val serverUrl: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[SERVER_URL] ?: ""
+        preferences[SERVER_URL] ?: "https://api.cattysms.shop"
     }
 
     val deviceId: Flow<String> = context.dataStore.data.map { preferences ->
