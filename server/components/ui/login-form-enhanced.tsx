@@ -139,16 +139,6 @@ export function LoginFormEnhanced({
                 "Sign In"
               )}
             </Button>
-
-            <div className="text-center text-sm">
-              <span className="text-muted-foreground">Don't have an account? </span>
-              <a
-                href="/register"
-                className="text-primary hover:underline font-medium"
-              >
-                Sign up
-              </a>
-            </div>
           </form>
         </CardContent>
       </Card>

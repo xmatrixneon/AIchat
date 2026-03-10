@@ -1,37 +1,13 @@
 module.exports = {
   apps: [
     {
-      name: "manager:1",
+      name: "manager",
       script: "npm",
       args: "start",
       instances: 1,
       exec_mode: "fork",
       env: {
         PORT: 3000,
-        HOST: "0.0.0.0",
-        NODE_ENV: "production"
-      }
-    },
-    {
-      name: "manager:2",
-      script: "npm",
-      args: "start",
-      instances: 1,
-      exec_mode: "fork",
-      env: {
-        PORT: 3001,
-        HOST: "0.0.0.0",
-        NODE_ENV: "production"
-      }
-    },
-    {
-      name: "manager:3",
-      script: "npm",
-      args: "start",
-      instances: 1,
-      exec_mode: "fork",
-      env: {
-        PORT: 3002,
         HOST: "0.0.0.0",
         NODE_ENV: "production"
       }
