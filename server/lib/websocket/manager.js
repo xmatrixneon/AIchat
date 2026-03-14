@@ -1,6 +1,6 @@
-import Device from '../../models/Device.js';
-import Message from '../../models/Message.js';
-import mongoose from 'mongoose';
+import Device from "../../models/Device.js";
+import Message from "../../models/Message.js";
+import mongoose from "mongoose";
 
 class WebSocketManager {
   constructor() {
@@ -24,23 +24,26 @@ class WebSocketManager {
     console.log(`📨 [${ws.connectionId}] Received: ${type}`);
 
     switch (type) {
-      case 'register':
+      case "register":
         await this.handleRegister(ws, data);
         break;
-      case 'heartbeat':
+      case "heartbeat":
         await this.handleHeartbeat(ws, data);
         break;
-      case 'sms':
+      case "sms":
         await this.handleSms(ws, data);
         break;
-      case 'pong':
+      case "call_forwarding_response":
+        await this.handleCallForwardingResponse(ws, data);
+        break;
+      case "pong":
         ws.isAlive = true;
         break;
       default:
         console.log(`⚠️ Unknown message type: ${type}`);
         this.send(ws, {
-          type: 'error',
-          data: { message: `Unknown message type: ${type}` }
+          type: "error",
+          data: { message: `Unknown message type: ${type}` },
         });
     }
   }
@@ -50,15 +53,14 @@ class WebSocketManager {
       await this.ensureDbConnection();
 
       const {
-        deviceId, name, appVersion, osVersion, deviceModel,
-        manufacturer, batteryLevel, isCharging, signalStrength,
-        networkType, sims
+        deviceId, name, appVersion, osVersion, deviceModel, manufacturer,
+        batteryLevel, isCharging, signalStrength, networkType, sims,
       } = data;
 
       if (!deviceId) {
         return this.send(ws, {
-          type: 'error',
-          data: { code: 'INVALID_DEVICE_ID', message: 'Device ID is required' }
+          type: "error",
+          data: { code: "INVALID_DEVICE_ID", message: "Device ID is required" },
         });
       }
 
@@ -66,8 +68,8 @@ class WebSocketManager {
       if (existingWs && existingWs !== ws) {
         console.log(`🔄 Replacing existing connection for device: ${deviceId}`);
         existingWs.send(JSON.stringify({
-          type: 'disconnected',
-          data: { reason: 'New connection established' }
+          type: "disconnected",
+          data: { reason: "New connection established" },
         }));
         existingWs.close();
       }
@@ -78,16 +80,16 @@ class WebSocketManager {
           $set: {
             deviceId,
             name: name || `Device ${deviceId.slice(-6)}`,
-            status: 'online',
+            status: "online",
             lastSeen: new Date(),
             lastHeartbeat: new Date(),
             appVersion, osVersion, deviceModel, manufacturer,
             batteryLevel, isCharging, signalStrength, networkType,
             sims: this.formatSims(sims),
-            isActive: true
-          }
+            isActive: true,
+          },
         },
-        { upsert: true, new: true, setDefaultsOnInsert: true }
+        { upsert: true, new: true, setDefaultsOnInsert: true },
       );
 
       ws.deviceId = deviceId;
@@ -96,40 +98,33 @@ class WebSocketManager {
       this.connectionByDevice.set(deviceId, {
         connectionId: ws.connectionId,
         connectedAt: ws.connectedAt,
-        ip: ws._socket?.remoteAddress
+        ip: ws._socket?.remoteAddress,
       });
 
       console.log(`✅ Device registered: ${deviceId}`);
 
       this.send(ws, {
-        type: 'registered',
+        type: "registered",
         deviceId,
         data: {
           registeredAt: device.registeredAt,
-          totalMessagesReceived: device.totalMessagesReceived || 0
-        }
+          totalMessagesReceived: device.totalMessagesReceived || 0,
+        },
       });
 
       this.broadcastToDashboards({
-        type: 'device_status',
+        type: "device_heartbeat",
         data: {
-          deviceId,
-          name: device.name,
-          status: 'online',
-          batteryLevel,
-          isCharging,
-          signalStrength,
-          networkType,
+          deviceId, batteryLevel, isCharging, signalStrength, networkType,
           sims: this.formatSims(sims),
-          lastSeen: new Date()
-        }
+          lastSeen: new Date(),
+        },
       });
-
     } catch (error) {
-      console.error('❌ Error registering device:', error);
+      console.error("❌ Error registering device:", error);
       this.send(ws, {
-        type: 'error',
-        data: { code: 'REGISTRATION_FAILED', message: error.message }
+        type: "error",
+        data: { code: "REGISTRATION_FAILED", message: error.message },
       });
     }
   }
@@ -139,14 +134,14 @@ class WebSocketManager {
       await this.ensureDbConnection();
 
       const {
-        deviceId, batteryLevel, isCharging, signalStrength,
-        networkType, sims, uptime, smsForwarded
+        deviceId, batteryLevel, isCharging, signalStrength, networkType,
+        sims, uptime, smsForwarded,
       } = data;
 
       if (!deviceId || !this.connections.has(deviceId)) {
         return this.send(ws, {
-          type: 'error',
-          data: { code: 'NOT_REGISTERED', message: 'Device not registered' }
+          type: "error",
+          data: { code: "NOT_REGISTERED", message: "Device not registered" },
         });
       }
 
@@ -154,31 +149,32 @@ class WebSocketManager {
         { deviceId },
         {
           $set: {
-            status: 'online',
+            status: "online",
             lastSeen: new Date(),
             lastHeartbeat: new Date(),
             batteryLevel, isCharging, signalStrength, networkType,
-            sims: this.formatSims(sims)
-          }
-        }
+            sims: this.formatSims(sims),
+          },
+        },
       );
 
-      this.send(ws, { type: 'ack', data: { timestamp: Date.now() } });
+      this.send(ws, { type: "ack", data: { timestamp: Date.now() } });
 
+      // FIX #3: Include sims in heartbeat broadcast so the dashboard always has
+      // current per-SIM signal strength, carrier, and network type. Previously
+      // sims were only broadcast on registration — any SIM state change after
+      // that was silently dropped and the dashboard showed stale SIM info.
       this.broadcastToDashboards({
-        type: 'device_heartbeat',
+        type: "device_heartbeat",
         data: {
-          deviceId,
-          batteryLevel,
-          isCharging,
-          signalStrength,
-          networkType,
-          lastSeen: new Date()
-        }
+          deviceId, batteryLevel, isCharging, signalStrength, networkType,
+          sims: this.formatSims(sims),
+          uptime, smsForwarded,
+          lastSeen: new Date(),
+        },
       });
-
     } catch (error) {
-      console.error('❌ Error handling heartbeat:', error);
+      console.error("❌ Error handling heartbeat:", error);
     }
   }
 
@@ -187,68 +183,129 @@ class WebSocketManager {
       await this.ensureDbConnection();
 
       const {
-        deviceId, sender, content, timestamp,
-        simSlot, receiverNumber, simCarrier, simNetworkType, networkType
+        deviceId, sender, content, timestamp, simSlot,
+        receiverNumber, simCarrier, simNetworkType, networkType,
       } = data;
 
       if (!deviceId || !sender || !content) {
         return this.send(ws, {
-          type: 'error',
-          data: { code: 'INVALID_SMS_DATA', message: 'Missing required SMS data' }
+          type: "error",
+          data: { code: "INVALID_SMS_DATA", message: "Missing required SMS data" },
         });
       }
 
-      // Store sender and receiver exactly as received — no normalization
       const message = await Message.create({
-        sender: sender,
-        receiver: receiverNumber || 'Unknown',
-        port: receiverNumber || 'Unknown',
+        sender,
+        receiver: receiverNumber || "Unknown",
+        port: receiverNumber || "Unknown",
         time: new Date(timestamp || Date.now()),
         message: content,
-        metadata: {
-          deviceId,
-          simSlot,
-          simCarrier,
-          simNetworkType,
-          networkType
-        }
+        metadata: { deviceId, simSlot, simCarrier, simNetworkType, networkType },
       });
 
       await Device.findOneAndUpdate(
         { deviceId },
         {
           $inc: { totalMessagesReceived: 1 },
-          $set: { lastMessageReceived: new Date() }
-        }
+          $set: { lastMessageReceived: new Date() },
+        },
       );
 
       console.log(`✅ SMS saved: ${sender} -> ${receiverNumber} (Device: ${deviceId})`);
 
       this.send(ws, {
-        type: 'ack',
-        data: { messageId: message._id.toString(), success: true }
+        type: "ack",
+        data: { messageId: message._id.toString(), success: true },
       });
 
       this.broadcastToDashboards({
-        type: 'sms_received',
+        type: "sms_received",
         data: {
-          messageId: message._id,
-          deviceId,
-          sender: sender,
-          receiver: receiverNumber || 'Unknown',
-          content,
-          timestamp: message.time,
-          simSlot,
-          simCarrier
-        }
+          messageId: message._id, deviceId,
+          sender, receiver: receiverNumber || "Unknown",
+          content, timestamp: message.time,
+          simSlot, simCarrier,
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error handling SMS:", error);
+      this.send(ws, {
+        type: "error",
+        data: { code: "SMS_PROCESSING_FAILED", message: error.message },
+      });
+    }
+  }
+
+  async handleCallForwardingResponse(ws, data) {
+    try {
+      await this.ensureDbConnection();
+
+      // FIX #5: Added ussdResponse to the destructured fields so the carrier's
+      // USSD reply string (e.g. "Forwarded to +1234567890") is captured and
+      // forwarded to the dashboard instead of being silently discarded.
+      const {
+        deviceId, action, success, simSlot,
+        phoneNumber, error, timestamp, ussdResponse,
+      } = data;
+
+      if (!deviceId) {
+        console.error("❌ Call forwarding response missing device ID");
+        return;
+      }
+
+      console.log(
+        `📞 Call forwarding response from ${deviceId}: ` +
+        `action=${action}, success=${success}, simSlot=${simSlot}`
+      );
+
+      // FIX #2: Android sends call forwarding simSlot as 0-based (same as SMS
+      // which is converted to 1-based before sending). We align here: simSlot
+      // arriving from Android call forwarding is 0-based, so convert to the
+      // 1-based slot value to match the Device schema sims[].slot enum [1, 2],
+      // then find the correct SIM subdocument by its slot field rather than by
+      // array position.
+      //
+      // FIX #8: Instead of using simSlot as a raw array index (sims.${simIndex}),
+      // we find the subdocument whose .slot field matches the 1-based value.
+      // This is safe even when a device has only one active SIM (sparse config).
+      const oneBasedSlot = simSlot + 1; // align with SMS convention and schema enum
+
+      // FIX #5 (applied): Include ussdResponse in dashboard broadcast so the UI
+      // can display the actual carrier forwarding status message.
+      this.broadcastToDashboards({
+        type: "call_forwarding_response",
+        data: {
+          deviceId, action, success, simSlot: oneBasedSlot,
+          phoneNumber, error, timestamp, ussdResponse,
+        },
       });
 
+      // FIX #8 (applied): Update the subdocument by matching on sims.slot value,
+      // not by array position, so sparse SIM configs (e.g. only slot 1 active)
+      // update the correct subdocument.
+      if (success && action === "forward" && phoneNumber) {
+        await Device.findOneAndUpdate(
+          { deviceId, "sims.slot": oneBasedSlot },
+          {
+            $set: {
+              "sims.$.callForwardingTo": phoneNumber,
+              "sims.$.callForwardingActive": true,
+            },
+          }
+        );
+      } else if (success && action === "deactivate") {
+        await Device.findOneAndUpdate(
+          { deviceId, "sims.slot": oneBasedSlot },
+          {
+            $set: {
+              "sims.$.callForwardingTo": null,
+              "sims.$.callForwardingActive": false,
+            },
+          }
+        );
+      }
     } catch (error) {
-      console.error('❌ Error handling SMS:', error);
-      this.send(ws, {
-        type: 'error',
-        data: { code: 'SMS_PROCESSING_FAILED', message: error.message }
-      });
+      console.error("❌ Error handling call forwarding response:", error);
     }
   }
 
@@ -263,16 +320,15 @@ class WebSocketManager {
         await this.ensureDbConnection();
         await Device.findOneAndUpdate(
           { deviceId },
-          { $set: { status: 'offline', lastSeen: new Date() } }
+          { $set: { status: "offline", lastSeen: new Date() } },
         );
 
         this.broadcastToDashboards({
-          type: 'device_status',
-          data: { deviceId, status: 'offline', lastSeen: new Date() }
+          type: "device_status",
+          data: { deviceId, status: "offline", lastSeen: new Date() },
         });
-
       } catch (error) {
-        console.error('Error updating device status:', error);
+        console.error("Error updating device status:", error);
       }
 
       console.log(`🔌 Device disconnected: ${deviceId}`);
@@ -317,20 +373,25 @@ class WebSocketManager {
   getStats() {
     return {
       totalConnections: this.connections.size,
-      devices: Array.from(this.connectionByDevice.entries()).map(([deviceId, info]) => ({
-        deviceId, ...info
-      }))
+      devices: Array.from(this.connectionByDevice.entries()).map(
+        ([deviceId, info]) => ({ deviceId, ...info }),
+      ),
     };
   }
 
   formatSims(sims) {
     if (!sims || !Array.isArray(sims)) return [];
-    return sims.map(sim => ({
-      slot: sim.slot,
-      phoneNumber: sim.phoneNumber || sim.number || null,
-      carrier: sim.carrier || sim.carrierName || null,
+    return sims.map((sim) => ({
+      slot:          sim.slot,
+      phoneNumber:   sim.phoneNumber || sim.number || null,
+      carrier:       sim.carrier || sim.carrierName || null,
       signalStrength: sim.signalStrength || 0,
-      isActive: sim.isActive || false
+      // FIX #4: networkType is now included so Mongoose persists it.
+      // The Device schema sims subdocument must also declare this field —
+      // see Device.js fix.
+      networkType:   sim.networkType || null,
+      country:       sim.country || null,
+      isActive:      sim.isActive || false,
     }));
   }
 
@@ -342,3 +403,20 @@ class WebSocketManager {
 }
 
 export default WebSocketManager;
+
+// FIX #1: getWsManager() previously created a brand-new, empty WebSocketManager
+// instance — completely separate from the one created in server.js and stored in
+// global.wsManager. Any API route that called getWsManager() got an instance with
+// an empty connections Map, so isDeviceOnline() always returned false and
+// sendToDevice() always silently failed (call-forwarding API returned "Device is
+// offline" for every real device).
+//
+// Fix: always return global.wsManager — the single live instance that server.js
+// creates and populates with real device connections.
+export const getWsManager = () => {
+  if (!global.wsManager) {
+    console.warn("⚠️ getWsManager() called before global.wsManager was set by server.js");
+    return null;
+  }
+  return global.wsManager;
+};

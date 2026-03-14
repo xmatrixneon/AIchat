@@ -1,7 +1,6 @@
 package com.cornspace.aichat.di
 
 import com.cornspace.aichat.data.remote.WebSocketClient
-import com.cornspace.aichat.util.NotificationUtils
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides

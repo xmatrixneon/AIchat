@@ -24,6 +24,9 @@ async function getIndiaId() {
 }
 
 async function syncDeviceNumbers() {
+  const startTime = Date.now();
+  const timestamp = new Date().toISOString();
+
   try {
     const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
 
@@ -31,25 +34,59 @@ async function syncDeviceNumbers() {
     const onlineDevices = activeDevices.filter(d => d.lastHeartbeat >= fiveMinutesAgo);
     const offlineDevices = activeDevices.filter(d => d.lastHeartbeat < fiveMinutesAgo);
 
-    console.log(`📱 Processing ${activeDevices.length} devices | Online: ${onlineDevices.length} | Offline: ${offlineDevices.length}`);
+    const totalNumbersBefore = await Numbers.countDocuments();
+    const activeNumbersBefore = await Numbers.countDocuments({ active: true });
+
+    console.log(`\n${'─'.repeat(55)}`);
+    console.log(`🔄 SYNC  ${timestamp}`);
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`📱 Devices   Total: ${activeDevices.length}  🟢 Online: ${onlineDevices.length}  🔴 Offline: ${offlineDevices.length}`);
+    console.log(`📋 Numbers   Total: ${totalNumbersBefore}  ✅ Active: ${activeNumbersBefore}  ❌ Inactive: ${totalNumbersBefore - activeNumbersBefore}`);
+    console.log(`${'─'.repeat(55)}`);
 
     const indiaId = await getIndiaId();
-    const allOnlineNumberPorts = new Set();
+    const allDeviceNumberPorts = new Set();
+    const syncedPhoneNumbers = new Set(); // Track all synced phone numbers
     let syncedCount = 0;
     let deactivatedCount = 0;
+    let numberChangedCount = 0;
+    let statusChangedOnline = 0;
+    let statusChangedOffline = 0;
 
-    // ✅ ONLINE devices — upsert numbers
-    for (const device of onlineDevices) {
-      if (device.status !== 'online') {
-        device.status = 'online';
+    // First pass: Sync all devices and track their numbers
+    for (const device of activeDevices) {
+      const isOnline = device.lastHeartbeat >= fiveMinutesAgo;
+      const newStatus = isOnline ? 'online' : 'offline';
+
+      if (device.status !== newStatus) {
+        device.status = newStatus;
         await device.save();
-        console.log(`🟢 Device ${device.deviceId} marked online`);
+        if (isOnline) {
+          statusChangedOnline++;
+          console.log(`🟢 ONLINE   ${device.deviceId} (${device.name || 'unnamed'})`);
+        } else {
+          statusChangedOffline++;
+          console.log(`🔴 OFFLINE  ${device.deviceId} (${device.name || 'unnamed'})`);
+        }
+      }
+
+      // Only sync numbers from ONLINE devices
+      // Offline devices should not override numbers from online devices
+      if (!isOnline) {
+        const result = await Numbers.updateMany(
+          { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
+          { $set: { active: false, signal: 0 } }
+        );
+        if (result.modifiedCount > 0) {
+          deactivatedCount += result.modifiedCount;
+        }
+        continue; // Skip syncing numbers from offline devices
       }
 
       for (const sim of device.sims) {
         if (sim.phoneNumber && sim.isActive) {
           const port = `${device.deviceId}-SIM${sim.slot}`;
-          allOnlineNumberPorts.add(port);
+          allDeviceNumberPorts.add(port);
 
           let phoneNumber = String(sim.phoneNumber).replace(/\D/g, '');
           if (phoneNumber.length === 12 && phoneNumber.startsWith("91")) {
@@ -58,6 +95,21 @@ async function syncDeviceNumbers() {
           phoneNumber = parseInt(phoneNumber);
 
           if (phoneNumber && phoneNumber.toString().length === 10) {
+            syncedPhoneNumbers.add(phoneNumber);
+
+            // Deactivate old number if SIM number changed on same port
+            const oldNumbers = await Numbers.find({ port, number: { $ne: phoneNumber }, active: true });
+            if (oldNumbers.length > 0) {
+              await Numbers.updateMany(
+                { port, number: { $ne: phoneNumber }, active: true },
+                { $set: { active: false, signal: 0 } }
+              );
+              oldNumbers.forEach(old => {
+                console.log(`🔄 SIM SWAP  ${old.number} → ${phoneNumber}  (${port})`);
+              });
+              numberChangedCount += oldNumbers.length;
+            }
+
             await Numbers.findOneAndUpdate(
               { number: phoneNumber },
               {
@@ -65,85 +117,81 @@ async function syncDeviceNumbers() {
                   countryid: indiaId,
                   port,
                   operator: sim.carrier || null,
-                  signal: sim.signalStrength || 0,
-                  active: true,
+                  signal: isOnline ? (sim.signalStrength || 0) : 0,
+                  active: isOnline,
                   lastRotation: new Date(),
                   locked: false,
                   iccid: sim.iccid || null,
-                  imsi: sim.imsi || null,
+                  imsi: sim.imsi || null
                 }
               },
               { upsert: true, new: true }
             );
             syncedCount++;
-            console.log(`✅ Synced number ${phoneNumber} from ${device.deviceId} SIM${sim.slot}`);
           } else {
-            console.warn(`⚠️ Invalid number on ${device.deviceId} SIM${sim.slot}: "${sim.phoneNumber}"`);
+            console.log(`⚠️  INVALID  ${device.deviceId} SIM${sim.slot} → "${sim.phoneNumber}"`);
           }
         }
       }
     }
 
-    // ❌ OFFLINE devices — deactivate only
-    for (const device of offlineDevices) {
-      if (device.status !== 'offline') {
-        device.status = 'offline';
-        await device.save();
-        console.log(`🔴 Device ${device.deviceId} marked offline`);
-      }
-
-      const result = await Numbers.updateMany(
-        { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
-        { $set: { active: false, signal: 0 } }
-      );
-
-      if (result.modifiedCount > 0) {
-        console.log(`📴 Deactivated ${result.modifiedCount} numbers for offline device: ${device.deviceId}`);
-        deactivatedCount += result.modifiedCount;
-      }
-    }
-
-    // 🧹 Cleanup stale ports from online devices (SIM removed/disabled)
-    const activeNumbersWithPort = await Numbers.find({
+    // Cleanup stale ports (only deactivate if number was NOT synced in this run)
+    const staleNumbers = await Numbers.find({
       port: { $regex: /^.*-SIM[0-9]+$/ },
       active: true
     });
 
-    for (const num of activeNumbersWithPort) {
-      if (!allOnlineNumberPorts.has(num.port)) {
+    for (const num of staleNumbers) {
+      // Only deactivate if port is stale AND number wasn't synced
+      if (!allDeviceNumberPorts.has(num.port) && !syncedPhoneNumbers.has(num.number)) {
         await Numbers.findByIdAndUpdate(num._id, {
           $set: { active: false, signal: 0 }
         });
         deactivatedCount++;
-        console.log(`🗑️ Stale number deactivated: ${num.number} (port: ${num.port})`);
+        console.log(`🗑️  STALE    ${num.number}  (${num.port})`);
       }
     }
 
-    console.log(`📊 Sync complete | Synced: ${syncedCount} | Deactivated: ${deactivatedCount}`);
-    console.log(`[${new Date().toISOString()}] ✅ Done`);
+    const totalNumbersAfter = await Numbers.countDocuments();
+    const activeNumbersAfter = await Numbers.countDocuments({ active: true });
+    const elapsed = Date.now() - startTime;
+
+    console.log(`${'─'.repeat(55)}`);
+    console.log(`✅ DONE  (${elapsed}ms)`);
+    console.log(`   Synced:       ${syncedCount} numbers`);
+    console.log(`   Deactivated:  ${deactivatedCount} numbers`);
+    if (numberChangedCount > 0)
+      console.log(`   SIM swaps:    ${numberChangedCount} numbers replaced`);
+    if (statusChangedOnline > 0 || statusChangedOffline > 0)
+      console.log(`   Status chg:   +${statusChangedOnline} online  -${statusChangedOffline} offline`);
+    console.log(`   Numbers now:  Total: ${totalNumbersAfter}  ✅ Active: ${activeNumbersAfter}  ❌ Inactive: ${totalNumbersAfter - activeNumbersAfter}`);
+    console.log(`${'─'.repeat(55)}\n`);
 
   } catch (err) {
-    console.error("❌ Error syncing device numbers:", err.message);
+    console.error(`\n❌ SYNC ERROR  ${timestamp}`);
+    console.error(`   ${err.message}\n`);
   }
 }
 
 async function initialize() {
-  console.log("🔄 Initializing status monitoring script...");
+  console.log(`\n${'═'.repeat(55)}`);
+  console.log(`🚀 SMS GATEWAY — STATUS MONITOR`);
+  console.log(`${'═'.repeat(55)}`);
 
   if (!MONGO_URI) {
     throw new Error("MONGODB_URI or MONGO_URI environment variable is not set.");
   }
 
   await mongoose.connect(MONGO_URI);
-  console.log("✅ MongoDB connected");
+  console.log(`✅ MongoDB connected`);
 
   cron.schedule("*/15 * * * * *", () => {
     syncDeviceNumbers();
   });
 
-  console.log("✅ Cron started — Device sync every 15 seconds");
+  console.log(`⏱️  Sync interval: every 15 seconds`);
+  console.log(`${'═'.repeat(55)}\n`);
 
-  console.log("🔄 Running initial sync...");
   await syncDeviceNumbers();
 }
 

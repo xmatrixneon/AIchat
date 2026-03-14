@@ -7,6 +7,7 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.cornspace.aichat.util.SecretConfig
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -29,12 +30,9 @@ class SettingsDataStore @Inject constructor(
         private val SERVICE_ENABLED = booleanPreferencesKey("service_enabled")
     }
 
-    // BUG 2 FIX: default URL removed
-    // Having a default URL means isServerUrlConfigured is always true
-    // so the Start button is always enabled even on fresh install
-    // The user should explicitly set their server URL
+    // Server URL - defaults to obfuscated constant from SecretConfig
     val serverUrl: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[SERVER_URL] ?: "https://api.cattysms.shop"
+        preferences[SERVER_URL] ?: SecretConfig.getServerUrl()
     }
 
     val deviceId: Flow<String> = context.dataStore.data.map { preferences ->

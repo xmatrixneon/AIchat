@@ -52,9 +52,9 @@ function buynumber($request) {
         $maxTries = 6;
         $validNumber = null;
 
-        // Cooldown time: between 5–20 minutes (randomized)
+        // Cooldown time: between 5–10 minutes (randomized)
         $cooldownMin = 5 * 60;   // 5 minutes in seconds
-        $cooldownMax = 20 * 60;  // 20 minutes in seconds
+        $cooldownMax = 10 * 60;  // 10 minutes in seconds
 
         for ($i = 0; $i < $maxTries; $i++) {
             $availableNumbers = $db->numbers->aggregate([

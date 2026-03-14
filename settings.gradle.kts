@@ -1,5 +1,6 @@
 pluginManagement {
     repositories {
+        maven("https://jitpack.io")
         google {
             content {
                 includeGroupByRegex("com\\.android.*")
@@ -14,10 +15,10 @@ pluginManagement {
 dependencyResolutionManagement {
     repositoriesMode.set(RepositoriesMode.FAIL_ON_PROJECT_REPOS)
     repositories {
+        maven("https://jitpack.io")
         google()
         mavenCentral()
     }
 }
-
 rootProject.name = "AI Chat"
 include(":app")

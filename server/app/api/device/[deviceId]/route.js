@@ -6,11 +6,9 @@ import { NextResponse } from 'next/server';
 export async function GET(request, { params }) {
   try {
     await connectDB();
-
     const { deviceId } = params;
 
     const device = await Device.findOne({ deviceId }).select('-__v -apiKey');
-
     if (!device) {
       return NextResponse.json(
         { success: false, error: 'Device not found' },
@@ -18,39 +16,24 @@ export async function GET(request, { params }) {
       );
     }
 
-    // Get recent messages for this device
-    const recentMessages = await Message.find({
-      'metadata.deviceId': deviceId
-    })
+    const recentMessages = await Message.find({ 'metadata.deviceId': deviceId })
       .sort({ time: -1 })
       .limit(50)
       .select('-__v');
 
-    // Get message stats
-    const totalMessages = await Message.countDocuments({
-      'metadata.deviceId': deviceId
-    });
+    const totalMessages = await Message.countDocuments({ 'metadata.deviceId': deviceId });
 
     const today = new Date();
     today.setHours(0, 0, 0, 0);
-
     const messagesToday = await Message.countDocuments({
       'metadata.deviceId': deviceId,
-      time: { $gte: today }
+      time: { $gte: today },
     });
 
     return NextResponse.json({
       success: true,
-      data: {
-        device,
-        recentMessages,
-        stats: {
-          totalMessages,
-          messagesToday
-        }
-      }
+      data: { device, recentMessages, stats: { totalMessages, messagesToday } },
     });
-
   } catch (error) {
     console.error('Error fetching device:', error);
     return NextResponse.json(
@@ -63,13 +46,40 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     await connectDB();
-
     const { deviceId } = params;
     const body = await request.json();
 
+    // FIX #6: Strip all fields that must never be overwritten by an API caller.
+    // The original did a direct $set of the raw request body, meaning any caller
+    // could overwrite deviceId, registeredAt, totalMessagesReceived, apiKey, etc.
+    // Only allow the fields that represent user-editable device metadata.
+    const {
+      // Immutable / system-managed — always excluded
+      deviceId:             _deviceId,
+      registeredAt:         _registeredAt,
+      createdAt:            _createdAt,
+      updatedAt:            _updatedAt,
+      apiKey:               _apiKey,
+      totalMessagesSent:    _totalMessagesSent,
+      totalMessagesReceived:_totalMessagesReceived,
+      lastMessageReceived:  _lastMessageReceived,
+      lastHeartbeat:        _lastHeartbeat,
+      lastSeen:             _lastSeen,
+      status:               _status,
+      // Everything else is caller-editable
+      ...allowedFields
+    } = body;
+
+    if (Object.keys(allowedFields).length === 0) {
+      return NextResponse.json(
+        { success: false, error: 'No editable fields provided' },
+        { status: 400 }
+      );
+    }
+
     const device = await Device.findOneAndUpdate(
       { deviceId },
-      { $set: body },
+      { $set: allowedFields },
       { new: true, runValidators: true }
     ).select('-__v -apiKey');
 
@@ -80,11 +90,7 @@ export async function PUT(request, { params }) {
       );
     }
 
-    return NextResponse.json({
-      success: true,
-      data: device
-    });
-
+    return NextResponse.json({ success: true, data: device });
   } catch (error) {
     console.error('Error updating device:', error);
     return NextResponse.json(
@@ -97,11 +103,9 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     await connectDB();
-
     const { deviceId } = params;
 
     const device = await Device.findOneAndDelete({ deviceId });
-
     if (!device) {
       return NextResponse.json(
         { success: false, error: 'Device not found' },
@@ -109,14 +113,9 @@ export async function DELETE(request, { params }) {
       );
     }
 
-    // Optionally delete associated messages
     await Message.deleteMany({ 'metadata.deviceId': deviceId });
 
-    return NextResponse.json({
-      success: true,
-      message: 'Device deleted successfully'
-    });
-
+    return NextResponse.json({ success: true, message: 'Device deleted successfully' });
   } catch (error) {
     console.error('Error deleting device:', error);
     return NextResponse.json(

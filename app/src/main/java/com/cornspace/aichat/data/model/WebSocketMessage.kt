@@ -24,6 +24,15 @@ sealed class WebSocketMessage {
         override val type = "error"
     }
 
+    // Call Forwarding Commands
+    data class CallForwardingCommand(val data: CallForwardingData) : WebSocketMessage() {
+        override val type = "call_forwarding"
+    }
+
+    data class CallForwardingResponse(val data: CallForwardingResponseData) : WebSocketMessage() {
+        override val type = "call_forwarding_response"
+    }
+
     // Outgoing to server
     data class Register(val data: RegisterData) : WebSocketMessage() {
         override val type = "register"
@@ -82,4 +91,22 @@ data class SmsReceivedData(
     val simCarrier: String?,
     val simNetworkType: String?,
     val networkType: String?
+)
+
+// Call forwarding command data
+data class CallForwardingData(
+    val action: String,  // "forward", "deactivate", "check"
+    val phoneNumber: String?,  // For "forward" action
+    val simSlot: Int = 0
+)
+
+// Call forwarding response data
+data class CallForwardingResponseData(
+    val deviceId: String,
+    val action: String,
+    val success: Boolean,
+    val simSlot: Int,
+    val phoneNumber: String? = null,
+    val error: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
 )
