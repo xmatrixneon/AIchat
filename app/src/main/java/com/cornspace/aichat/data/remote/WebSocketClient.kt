@@ -274,35 +274,23 @@ class WebSocketClient @Inject constructor(
         if (send(WebSocketMessage.SmsReceived(smsData))) smsForwardedCount.incrementAndGet()
     }
 
-    // FIX #5: Added ussdResponse parameter so the carrier's USSD reply string is
-    // included in the message sent to the server.
-    // FIX (compile): CallForwardingResponseData may not have a ussdResponse field.
-    // We serialize the full payload as a raw map so the extra field is included
-    // in the JSON without requiring any change to the data class.
-    // FIX #2: simSlot converted from 0-based to 1-based to match SMS convention
-    // and the Device schema sims[].slot enum [1, 2].
     fun sendCallForwardingResponse(
         deviceId: String, action: String, success: Boolean, simSlot: Int,
         phoneNumber: String? = null, error: String? = null, ussdResponse: String? = null
     ) {
         if (!isConnected()) { Log.w(TAG, "Cannot send — not connected"); return }
         try {
-            val payload = mutableMapOf<String, Any?>(
-                "type" to "call_forwarding_response",
-                "data" to mutableMapOf<String, Any?>(
-                    "deviceId"     to deviceId,
-                    "action"       to action,
-                    "success"      to success,
-                    "simSlot"      to (simSlot + 1), // 0-based → 1-based
-                    "phoneNumber"  to phoneNumber,
-                    "error"        to error,
-                    "ussdResponse" to ussdResponse,
-                    "timestamp"    to System.currentTimeMillis()
-                )
+            val response = CallForwardingResponseData(
+                deviceId = deviceId,
+                action = action,
+                success = success,
+                simSlot = simSlot + 1, // 0-based → 1-based
+                phoneNumber = phoneNumber,
+                error = error,
+                ussdResponse = ussdResponse,
+                timestamp = System.currentTimeMillis()
             )
-            val json = gson.toJson(payload)
-            Log.d(TAG, "Sending: $json")
-            webSocket?.send(json)
+            send(WebSocketMessage.CallForwardingResponse(response))
         } catch (e: Exception) {
             Log.e(TAG, "Error sending call forwarding response", e)
         }

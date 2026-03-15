@@ -24,7 +24,6 @@ data class SimInfo(
     fun toMap(): Map<String, Any?> = mapOf(
         "slot" to (slot + 1),
         "phoneNumber" to number,
-        "carrier" to carrierName,
         "carrierName" to carrierName,
         "country" to country,
         "signalStrength" to (signalStrength ?: 0),

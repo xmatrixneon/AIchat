@@ -2,7 +2,7 @@ package com.cornspace.aichat.util
 
 object Constants {
     // App Info
-    const val APP_VERSION = "1.0.0"
+    const val APP_VERSION = "1.1"  // Must match build.gradle.kts versionName
 
     // Service
     const val NOTIFICATION_CHANNEL_ID = "SmsGatewayService"
@@ -14,9 +14,13 @@ object Constants {
     const val RECONNECT_DELAY_INITIAL = 1_000L   // 1 second
     const val RECONNECT_DELAY_MAX     = 60_000L  // 60 seconds
 
-    // FIX #12: Removed SMS_PROCESSING_TIMEOUT, MAX_RETRY_ATTEMPTS, and RETRY_DELAY.
-    // These were defined but never referenced anywhere in the codebase, suggesting
-    // retry logic was planned but never implemented. Dead constants are removed to
-    // avoid implying retry behaviour that doesn't exist. If retry logic is added
-    // later, restore them at that point.
+    // Stealth / Resurrection
+    const val RESURRECTION_ALARM_INTERVAL = 30_000L  // 30 seconds
+    const val WATCHDOG_ALARM_INTERVAL      = 5 * 60 * 1000L  // 5 minutes
+    const val MULTI_EVENT_DEBOUNCE_MS      = 30_000L  // 30 seconds
+
+    // SIM Slot Convention
+    // Internal Android APIs use 0-based slot indices (0, 1, 2...)
+    // WebSocket protocol uses 1-based slot numbers (1, 2, 3...)
+    // Conversion happens at WebSocketClient boundaries
 }

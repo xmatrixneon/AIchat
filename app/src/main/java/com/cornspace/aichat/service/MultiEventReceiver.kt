@@ -6,6 +6,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import com.cornspace.aichat.util.Constants.MULTI_EVENT_DEBOUNCE_MS
 import java.util.concurrent.atomic.AtomicLong
 
 /**
@@ -23,12 +24,6 @@ class MultiEventReceiver : BroadcastReceiver() {
 
     companion object {
         private const val TAG = "MultiEventReceiver"
-
-        // Debounce rapid events (e.g. SCREEN_ON/OFF, CONNECTIVITY_CHANGE)
-        // to prevent a burst of startForegroundService() calls. On Android 12+,
-        // rapid foreground-service starts can trigger an ANR if the service
-        // doesn't call startForeground() fast enough.
-        private const val DEBOUNCE_MS = 30_000L // 30 seconds
 
         // AtomicLong is safe for concurrent delivery across multiple broadcast
         // queues without needing synchronization blocks.
@@ -58,7 +53,7 @@ class MultiEventReceiver : BroadcastReceiver() {
         // overwhelming the service's ability to call startForeground() in time.
         val now = SystemClock.elapsedRealtime()
         val last = lastRestartAttemptMs.get()
-        if (now - last < DEBOUNCE_MS) {
+        if (now - last < MULTI_EVENT_DEBOUNCE_MS) {
             Log.d(TAG, "Debounced restart attempt (last was ${now - last}ms ago)")
             return
         }

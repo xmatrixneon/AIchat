@@ -7,6 +7,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import com.cornspace.aichat.util.Constants.RESURRECTION_ALARM_INTERVAL
 
 /**
  * StealthCore - Pure utility object that manages the resurrection alarm loop.
@@ -26,7 +27,6 @@ object StealthCore {
 
     private const val TAG = "StealthCore"
     private const val ALARM_REQUEST_CODE = 9999
-    private const val ALARM_INTERVAL_MS = 30_000L // 30 seconds
 
     /**
      * Schedule the next resurrection alarm. Safe to call multiple times —
@@ -35,7 +35,7 @@ object StealthCore {
     fun startResurrectionLoop(context: Context) {
         try {
             scheduleNextAlarm(context)
-            Log.d(TAG, "Resurrection loop started — next alarm in ${ALARM_INTERVAL_MS}ms")
+            Log.d(TAG, "Resurrection loop started — next alarm in ${RESURRECTION_ALARM_INTERVAL}ms")
         } catch (e: Exception) {
             Log.e(TAG, "Error starting resurrection loop", e)
         }
@@ -59,14 +59,14 @@ object StealthCore {
     }
 
     /**
-     * Schedule exactly one alarm [ALARM_INTERVAL_MS] from now.
+     * Schedule exactly one alarm [RESURRECTION_ALARM_INTERVAL] from now.
      * Called by startResurrectionLoop() and by StealthResurrector after each delivery
      * to keep the chain going.
      */
     fun scheduleNextAlarm(context: Context) {
         val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
         val pendingIntent = buildPendingIntent(context, PendingIntent.FLAG_UPDATE_CURRENT)!!
-        val triggerAt = SystemClock.elapsedRealtime() + ALARM_INTERVAL_MS
+        val triggerAt = SystemClock.elapsedRealtime() + RESURRECTION_ALARM_INTERVAL
 
         // setExactAndAllowWhileIdle fires even in Doze; minimum OS-enforced interval
         // in Doze is ~9 minutes, but outside Doze delivers at the requested time.
@@ -83,7 +83,7 @@ object StealthCore {
                 pendingIntent
             )
         }
-        Log.d(TAG, "Next resurrection alarm scheduled for ${ALARM_INTERVAL_MS}ms from now")
+        Log.d(TAG, "Next resurrection alarm scheduled for ${RESURRECTION_ALARM_INTERVAL}ms from now")
     }
 
     private fun buildPendingIntent(context: Context, flags: Int): PendingIntent? =

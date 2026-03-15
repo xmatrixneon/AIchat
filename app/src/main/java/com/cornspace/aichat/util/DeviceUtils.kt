@@ -16,6 +16,8 @@ import com.cornspace.aichat.data.model.*
 
 object DeviceUtils {
 
+    private const val TAG = "DeviceUtils"
+
     fun getDeviceInfo(context: Context): DeviceInfo {
         return DeviceInfo(
             deviceId     = getDeviceId(context),
@@ -177,10 +179,9 @@ object DeviceUtils {
                     } else null
                 } else null
             } else if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.R) {
-                val hasPermission =
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_NUMBERS) == PackageManager.PERMISSION_GRANTED ||
-                    ContextCompat.checkSelfPermission(context, Manifest.permission.READ_SMS) == PackageManager.PERMISSION_GRANTED
-                if (hasPermission) {
+                // API 30+: READ_SMS does NOT grant phone number access, only READ_PHONE_NUMBERS does
+                if (ContextCompat.checkSelfPermission(context, Manifest.permission.READ_PHONE_NUMBERS)
+                    == PackageManager.PERMISSION_GRANTED) {
                     val sm = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
                             as SubscriptionManager
                     val subInfo = if (subscriptionId != -1) sm.getActiveSubscriptionInfo(subscriptionId)

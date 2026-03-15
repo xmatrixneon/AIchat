@@ -8,6 +8,7 @@ import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
 import android.util.Log
+import com.cornspace.aichat.util.Constants.WATCHDOG_ALARM_INTERVAL
 
 /**
  * Periodic alarm receiver that restarts the service if it has been killed.
@@ -19,7 +20,6 @@ class AlarmReceiver : BroadcastReceiver() {
     companion object {
         private const val TAG = "AlarmReceiver"
         private const val ALARM_REQUEST_CODE = 1001
-        private const val INTERVAL_MS = 5 * 60 * 1000L // 5 minutes
 
         fun scheduleAlarm(context: Context) {
             try {
@@ -28,11 +28,11 @@ class AlarmReceiver : BroadcastReceiver() {
 
                 alarmManager.setInexactRepeating(
                     AlarmManager.ELAPSED_REALTIME_WAKEUP,
-                    SystemClock.elapsedRealtime() + INTERVAL_MS,
-                    INTERVAL_MS,
+                    SystemClock.elapsedRealtime() + WATCHDOG_ALARM_INTERVAL,
+                    WATCHDOG_ALARM_INTERVAL,
                     pendingIntent
                 )
-                Log.d(TAG, "Watchdog alarm scheduled — interval ${INTERVAL_MS}ms")
+                Log.d(TAG, "Watchdog alarm scheduled — interval ${WATCHDOG_ALARM_INTERVAL}ms")
             } catch (e: Exception) {
                 Log.e(TAG, "Error scheduling alarm", e)
             }

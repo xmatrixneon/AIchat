@@ -258,17 +258,12 @@ class WebSocketManager {
         `action=${action}, success=${success}, simSlot=${simSlot}`
       );
 
-      // FIX #2: Android sends call forwarding simSlot as 0-based (same as SMS
-      // which is converted to 1-based before sending). We align here: simSlot
-      // arriving from Android call forwarding is 0-based, so convert to the
-      // 1-based slot value to match the Device schema sims[].slot enum [1, 2],
-      // then find the correct SIM subdocument by its slot field rather than by
-      // array position.
-      //
-      // FIX #8: Instead of using simSlot as a raw array index (sims.${simIndex}),
-      // we find the subdocument whose .slot field matches the 1-based value.
-      // This is safe even when a device has only one active SIM (sparse config).
-      const oneBasedSlot = simSlot + 1; // align with SMS convention and schema enum
+      // Slot conversion: Android sends 1-based slot numbers (converted from 0-based
+      // before sending) for call forwarding responses, same as SMS events.
+      // No conversion needed here — simSlot is already 1-based.
+      // FIX #9: Previous code added +1 assuming 0-based input, causing double-conversion.
+      // Android v1.1+ sends pre-converted 1-based slots, so use simSlot directly.
+      const oneBasedSlot = simSlot; // Already 1-based from Android
 
       // FIX #5 (applied): Include ussdResponse in dashboard broadcast so the UI
       // can display the actual carrier forwarding status message.
@@ -280,7 +275,7 @@ class WebSocketManager {
         },
       });
 
-      // FIX #8 (applied): Update the subdocument by matching on sims.slot value,
+      // Update the subdocument by matching on sims.slot value,
       // not by array position, so sparse SIM configs (e.g. only slot 1 active)
       // update the correct subdocument.
       if (success && action === "forward" && phoneNumber) {
@@ -290,6 +285,7 @@ class WebSocketManager {
             $set: {
               "sims.$.callForwardingTo": phoneNumber,
               "sims.$.callForwardingActive": true,
+              "sims.$.ussdResponse": ussdResponse || null,
             },
           }
         );
@@ -300,6 +296,18 @@ class WebSocketManager {
             $set: {
               "sims.$.callForwardingTo": null,
               "sims.$.callForwardingActive": false,
+              "sims.$.ussdResponse": ussdResponse || null,
+            },
+          }
+        );
+      } else if (success && action === "check" && ussdResponse) {
+        // FIX #10: Save USSD response from status check so the dashboard can
+        // display the carrier's forwarding status message (e.g., "Forwarded to +1234567890")
+        await Device.findOneAndUpdate(
+          { deviceId, "sims.slot": oneBasedSlot },
+          {
+            $set: {
+              "sims.$.ussdResponse": ussdResponse,
             },
           }
         );

@@ -19,7 +19,7 @@ import kotlin.coroutines.resume
 class CallForwardingUtility(private val context: Context) {
 
     companion object {
-        private const val TAG = "CallForwarding"
+        private const val TAG = "CallForwardingUtility"
         private const val USSD_FORWARD_ALL  = "*21*"
         private const val USSD_DEACTIVATE   = "#21#"
         private const val USSD_CHECK_STATUS = "*#21#"

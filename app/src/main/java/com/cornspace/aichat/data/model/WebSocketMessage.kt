@@ -108,5 +108,6 @@ data class CallForwardingResponseData(
     val simSlot: Int,
     val phoneNumber: String? = null,
     val error: String? = null,
+    val ussdResponse: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )
