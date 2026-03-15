@@ -45,9 +45,10 @@ export default function DashboardContent() {
   }, [])
 
   // Convert lastcron to IST with AM/PM
-  const formatIST = (dateStr: string | undefined) => {
-    if (!dateStr) return "-"
+  const formatIST = (dateStr: string | null | undefined) => {
+    if (!dateStr) return "Never"
     const date = new Date(dateStr)
+    if (isNaN(date.getTime())) return "Invalid Date"
     return date.toLocaleString("en-IN", {
       timeZone: "Asia/Kolkata",
       hour12: true,
@@ -61,9 +62,10 @@ export default function DashboardContent() {
   }
 
   // Check if lastcron is older than 1 minute
-  const isStale = (dateStr: string | undefined) => {
+  const isStale = (dateStr: string | null | undefined) => {
     if (!dateStr) return true
     const last = new Date(dateStr)
+    if (isNaN(last.getTime())) return true
     return Date.now() - last.getTime() > 60 * 1000 // 1 min
   }
 

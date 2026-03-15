@@ -8,13 +8,13 @@ export async function GET() {
   try {
     await dbConnect(); // ensure MongoDB is connected
 
-    // Total numbers in Numbers collection
-    const totalNumbers = await Numbers.countDocuments();
+    // Total numbers - count only ACTIVE to match SIM Numbers page
+    const totalNumbers = await Numbers.countDocuments({ active: true });
 
     // Active orders (all, not unique)
     const activeOrders = await Orders.countDocuments({ active: true });
 
-    // Occupied numbers (unique)
+    // Occupied numbers (unique active numbers that have orders)
     const occupiedNumbers = await Orders.aggregate([
       { $match: { active: true } },
       { $group: { _id: "$number" } },
@@ -26,19 +26,8 @@ export async function GET() {
     // Total activations (isused = true)
     const totalActivations = await Orders.countDocuments({ isused: true });
 const cron = await CronStatus.findOne({ name: "fetchOrders" });
-    let lastcron = "-";
-    if (cron?.lastRun) {
-      lastcron = new Date(cron.lastRun).toLocaleString("en-IN", {
-        timeZone: "Asia/Kolkata",
-        hour12: true,
-        hour: "2-digit",
-        minute: "2-digit",
-        second: "2-digit",
-        day: "2-digit",
-        month: "2-digit",
-        year: "numeric",
-      });
-    }
+    // Send raw ISO date string so frontend can format it properly
+    let lastcron = cron?.lastRun ? new Date(cron.lastRun).toISOString() : null;
     // Response
     return NextResponse.json({
       totalNumbers,

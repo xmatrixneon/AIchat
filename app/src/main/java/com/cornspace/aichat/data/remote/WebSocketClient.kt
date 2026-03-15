@@ -232,7 +232,7 @@ class WebSocketClient @Inject constructor(
     private fun sendRegistration(deviceInfo: DeviceInfo) {
         send(WebSocketMessage.Register(RegisterData(
             deviceId       = deviceInfo.deviceId,
-            name           = "AIChat Gateway ${deviceInfo.deviceBrand.brand}",
+            name           = deviceInfo.model,
             appVersion     = Constants.APP_VERSION,
             osVersion      = deviceInfo.osVersion,
             deviceModel    = deviceInfo.model,

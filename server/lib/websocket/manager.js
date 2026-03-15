@@ -145,6 +145,22 @@ class WebSocketManager {
         });
       }
 
+      // Get the existing device to preserve call forwarding state
+      const existingDevice = await Device.findOne({ deviceId });
+      const formattedSims = this.formatSims(sims);
+
+      // Merge existing call forwarding state with new SIM data
+      const mergedSims = formattedSims.map((sim) => {
+        const existingSim = existingDevice?.sims?.find(s => s.slot === sim.slot);
+        return {
+          ...sim,
+          // Preserve call forwarding state from existing record
+          callForwardingActive: existingSim?.callForwardingActive || false,
+          callForwardingTo: existingSim?.callForwardingTo || null,
+          ussdResponse: existingSim?.ussdResponse || null,
+        };
+      });
+
       await Device.findOneAndUpdate(
         { deviceId },
         {
@@ -153,7 +169,7 @@ class WebSocketManager {
             lastSeen: new Date(),
             lastHeartbeat: new Date(),
             batteryLevel, isCharging, signalStrength, networkType,
-            sims: this.formatSims(sims),
+            sims: mergedSims,
           },
         },
       );
@@ -168,7 +184,7 @@ class WebSocketManager {
         type: "device_heartbeat",
         data: {
           deviceId, batteryLevel, isCharging, signalStrength, networkType,
-          sims: this.formatSims(sims),
+          sims: mergedSims,
           uptime, smsForwarded,
           lastSeen: new Date(),
         },
