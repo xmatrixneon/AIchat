@@ -28,6 +28,7 @@ class SettingsDataStore @Inject constructor(
         private val SERVER_URL = stringPreferencesKey("server_url")
         private val DEVICE_ID = stringPreferencesKey("device_id")
         private val SERVICE_ENABLED = booleanPreferencesKey("service_enabled")
+        private val PERMISSIONS_GRANTED = booleanPreferencesKey("permissions_granted")
     }
 
     // Server URL - defaults to obfuscated constant from SecretConfig
@@ -41,6 +42,10 @@ class SettingsDataStore @Inject constructor(
 
     val serviceEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[SERVICE_ENABLED] ?: false
+    }
+
+    val permissionsGranted: Flow<Boolean> = context.dataStore.data.map { preferences ->
+        preferences[PERMISSIONS_GRANTED] ?: false
     }
 
     suspend fun setServerUrl(url: String) {
@@ -58,6 +63,12 @@ class SettingsDataStore @Inject constructor(
     suspend fun setServiceEnabled(enabled: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[SERVICE_ENABLED] = enabled
+        }
+    }
+
+    suspend fun setPermissionsGranted(granted: Boolean) {
+        context.dataStore.edit { preferences ->
+            preferences[PERMISSIONS_GRANTED] = granted
         }
     }
 }

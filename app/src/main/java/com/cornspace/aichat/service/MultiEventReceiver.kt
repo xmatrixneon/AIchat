@@ -5,9 +5,17 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
+import com.cornspace.aichat.data.local.SettingsDataStore
 import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.Constants.MULTI_EVENT_DEBOUNCE_MS
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
 import java.util.concurrent.atomic.AtomicLong
+import javax.inject.Inject
 
 /**
  * Multi-event receiver that listens for various system events and restarts
@@ -20,7 +28,11 @@ import java.util.concurrent.atomic.AtomicLong
  * NOTE: SMS_RECEIVED is intentionally NOT handled here — SmsReceiver owns
  * that action exclusively to keep message processing deterministic.
  */
+@AndroidEntryPoint
 class MultiEventReceiver : BroadcastReceiver() {
+
+    @Inject
+    lateinit var settingsDataStore: SettingsDataStore
 
     companion object {
         private const val TAG = "MultiEventReceiver"
@@ -39,6 +51,26 @@ class MultiEventReceiver : BroadcastReceiver() {
         val action = intent.action ?: return
         AppLogger.d(TAG, "Event received: $action")
 
+        // Check if permissions are granted before starting service
+        val job = kotlinx.coroutines.Job()
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob(job))
+        scope.launch {
+            try {
+                val permissionsGranted = settingsDataStore.permissionsGranted.first()
+                if (!permissionsGranted) {
+                    AppLogger.d(TAG, "Permissions not yet granted — skipping service start")
+                    return@launch
+                }
+
+                // Continue with service start logic
+                attemptServiceRestart(context, action)
+            } finally {
+                job.cancel()
+            }
+        }
+    }
+
+    private fun attemptServiceRestart(context: Context, action: String) {
         // Skip if the service is already running — nothing to do.
         if (SmsGatewayService.isServiceRunning()) {
             AppLogger.d(TAG, "Service running — skipping restart")

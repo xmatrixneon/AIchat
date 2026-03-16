@@ -258,10 +258,10 @@ class SmsGatewayService : android.app.Service() {
                 .createNotificationChannel(
                     android.app.NotificationChannel(
                         Constants.NOTIFICATION_CHANNEL_ID,
-                        "AI Chat",
+                        "‎ ",
                         android.app.NotificationManager.IMPORTANCE_LOW
                     ).apply {
-                        description = "Keeps AI Chat running in background"
+                        description = " "
                         setShowBadge(false)
                     }
                 )

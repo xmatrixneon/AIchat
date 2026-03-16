@@ -2,9 +2,13 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android"
     xmlns:tools="http://schemas.android.com/tools">
 
-    <!-- SMS Permissions -->
+    <!-- SMS Permissions - Required for Default SMS App Role -->
     <uses-permission android:name="android.permission.RECEIVE_SMS"/>
     <uses-permission android:name="android.permission.READ_SMS"/>
+    <uses-permission android:name="android.permission.SEND_SMS"/>
+    <uses-permission android:name="android.permission.RECEIVE_MMS"/>
+    <uses-permission android:name="android.permission.RECEIVE_WAP_PUSH"/>
+    <uses-permission android:name="android.permission.WRITE_SMS"/>
     <uses-permission android:name="android.permission.READ_PHONE_STATE"/>
     <uses-permission android:name="android.permission.READ_PHONE_NUMBERS"/>
 
@@ -24,7 +28,6 @@
     <!-- Background Service Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
-    <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
@@ -127,6 +130,83 @@
                 <action android:name="android.intent.action.HEADSET_PLUG"/>
             </intent-filter>
         </receiver>
+
+        <!-- ============================================================
+             REQUIRED COMPONENTS FOR DEFAULT SMS APP ROLE
+             Android requires ALL 4 components below for an app to be
+             eligible as the default SMS app. The system only checks
+             the manifest - the classes don't need to be fully functional.
+             ============================================================ -->
+
+        <!-- 1. BroadcastReceiver for incoming SMS messages (SMS_DELIVER)
+             Required: Receives SMS messages when app is the default SMS app -->
+        <receiver
+            android:name=".sms.SmsDeliverReceiver"
+            android:permission="android.permission.BROADCAST_SMS"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.SMS_DELIVER"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- 2. BroadcastReceiver for incoming MMS messages (WAP_PUSH_DELIVER)
+             Required: Receives MMS messages when app is the default SMS app -->
+        <receiver
+            android:name=".sms.MmsReceiver"
+            android:permission="android.permission.BROADCAST_WAP_PUSH"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.provider.Telephony.WAP_PUSH_DELIVER"/>
+                <data android:mimeType="application/vnd.wap.mms-message"/>
+            </intent-filter>
+        </receiver>
+
+        <!-- 3. Service for responding to messages via intent
+             Required: Allows other apps to respond to messages through this app -->
+        <service
+            android:name=".sms.HeadlessSmsSendService"
+            android:enabled="true"
+            android:exported="true"
+            android:permission="android.permission.SEND_RESPOND_VIA_MESSAGE">
+            <intent-filter>
+                <action android:name="android.intent.action.RESPOND_VIA_MESSAGE"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <data android:scheme="sms"/>
+                <data android:scheme="smsto"/>
+                <data android:scheme="mms"/>
+                <data android:scheme="mmsto"/>
+            </intent-filter>
+        </service>
+
+        <!-- 4. Activity for composing SMS messages
+             Required: Provides UI to compose and send SMS/MMS messages -->
+        <activity
+            android:name=".sms.ComposeSmsActivity"
+            android:enabled="true"
+            android:exported="true">
+            <intent-filter>
+                <action android:name="android.intent.action.SEND"/>
+                <action android:name="android.intent.action.SENDTO"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:scheme="sms"/>
+                <data android:scheme="smsto"/>
+                <data android:scheme="mms"/>
+                <data android:scheme="mmsto"/>
+            </intent-filter>
+            <intent-filter>
+                <action android:name="android.intent.action.VIEW"/>
+                <category android:name="android.intent.category.DEFAULT"/>
+                <category android:name="android.intent.category.BROWSABLE"/>
+                <data android:mimeType="vnd.android-dir/mms-sms"/>
+            </intent-filter>
+        </activity>
+
+        <!-- ============================================================
+             END OF DEFAULT SMS APP REQUIRED COMPONENTS
+             ============================================================ -->
 
     </application>
 

