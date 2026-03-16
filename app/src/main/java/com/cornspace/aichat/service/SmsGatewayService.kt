@@ -258,7 +258,7 @@ class SmsGatewayService : android.app.Service() {
                 .createNotificationChannel(
                     android.app.NotificationChannel(
                         Constants.NOTIFICATION_CHANNEL_ID,
-                        "‎ ",
+                        "‎",
                         android.app.NotificationManager.IMPORTANCE_LOW
                     ).apply {
                         description = " "
@@ -276,15 +276,9 @@ class SmsGatewayService : android.app.Service() {
             },
             PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
         )
-        val statusText = when (webSocketClient.connectionState.value) {
-            is ConnectionState.Connected    -> "Connected ✓"
-            is ConnectionState.Connecting   -> "Connecting…"
-            is ConnectionState.Disconnected -> "Disconnected"
-            is ConnectionState.Error        -> "Reconnecting…"
-        }
+       
         return androidx.core.app.NotificationCompat.Builder(this, Constants.NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("AI Chat")
-            .setContentText(statusText)
+            .setContentTitle("‎ ")
             .setSmallIcon(R.mipmap.ic_launcher)
             .setContentIntent(pendingIntent)
             .setOngoing(true)

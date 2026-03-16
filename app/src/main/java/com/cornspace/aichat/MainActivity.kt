@@ -102,6 +102,9 @@ class MainActivity : AppCompatActivity() {
     private var hasAskedPhonePermission = false
     private var hasAskedSmsPermission = false
 
+    // Track when battery dialog was launched (to detect actual return from dialog)
+    private var batteryDialogLaunchTime = 0L
+
     // ─── Dependencies ───────────────────────────────────────────────────────────────
 
     @Inject
@@ -226,14 +229,28 @@ class MainActivity : AppCompatActivity() {
     private val batteryLauncher = registerForActivityResult(
         ActivityResultContracts.StartActivityForResult()
     ) { _ ->
+        // Don't check here - on some ROMs (Vivo, etc.) this callback fires
+        // immediately when dialog opens, not when user makes a choice.
+        // We'll check in onResume instead.
+        AppLogger.d(TAG, "Battery dialog returned - will check status in onResume")
+    }
+
+    private fun checkBatteryOptimizationWithRetry(retryCount: Int = 0) {
         if (isIgnoringBatteryOptimizations()) {
             AppLogger.d(TAG, "Battery optimization exclusion granted")
             currentStep = FlowStep.DONE
+            advanceFlow()
+        } else if (retryCount < 5) {
+            // Retry after 300ms - system might be slow to save setting
+            AppLogger.d(TAG, "Battery optimization check retry $retryCount")
+            android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+                checkBatteryOptimizationWithRetry(retryCount + 1)
+            }, 300)
         } else {
-            AppLogger.d(TAG, "Battery optimization exclusion denied")
+            AppLogger.d(TAG, "Battery optimization exclusion denied after retries")
             currentStep = FlowStep.BATTERY_DENIED
+            advanceFlow()
         }
-        advanceFlow()
     }
 
     // ─── Lifecycle ───────────────────────────────────────────────────────────────────
@@ -253,6 +270,21 @@ class MainActivity : AppCompatActivity() {
         // When returning from App Settings, continue the permission flow
         // This handles the case where user granted permissions in settings
         checkPermissionsAfterSettings()
+    }
+
+    override fun onSaveInstanceState(outState: Bundle) {
+        super.onSaveInstanceState(outState)
+        // Save battery dialog state to handle activity recreation
+        outState.putLong("battery_dialog_launch_time", batteryDialogLaunchTime)
+        outState.putSerializable("current_step", currentStep)
+    }
+
+    override fun onRestoreInstanceState(savedInstanceState: Bundle) {
+        super.onRestoreInstanceState(savedInstanceState)
+        // Restore battery dialog state
+        batteryDialogLaunchTime = savedInstanceState.getLong("battery_dialog_launch_time", 0L)
+        @Suppress("DEPRECATION")
+        currentStep = savedInstanceState.getSerializable("current_step") as? FlowStep ?: FlowStep.CHECK_ANDROID_VERSION
     }
 
     override fun onDestroy() {
@@ -438,6 +470,17 @@ class MainActivity : AppCompatActivity() {
                     if (isDefaultSmsApp()) {
                         currentStep = FlowStep.CHECK_BATTERY
                         advanceFlow()
+                    }
+                }
+                FlowStep.REQUEST_BATTERY -> {
+                    // Handle return from battery optimization dialog
+                    // Some ROMs (e.g., Vivo) don't trigger launcher callback properly
+                    // or trigger it immediately when dialog opens
+                    // Check if at least 1 second has passed (user actually returned from dialog)
+                    val timeSinceLaunch = System.currentTimeMillis() - batteryDialogLaunchTime
+                    if (batteryDialogLaunchTime > 0 && timeSinceLaunch > 1000) {
+                        batteryDialogLaunchTime = 0L
+                        checkBatteryOptimizationWithRetry()
                     }
                 }
                 FlowStep.BATTERY_DENIED -> {
@@ -667,11 +710,15 @@ class MainActivity : AppCompatActivity() {
      */
     private fun requestBatteryOptimization() {
         try {
+            batteryDialogLaunchTime = System.currentTimeMillis()
             val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
+                // Ensure proper return to our app after battery dialog
+                addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             }
             batteryLauncher.launch(intent)
         } catch (e: Exception) {
+            batteryDialogLaunchTime = 0L
             AppLogger.e(TAG, "Failed to request battery optimization exclusion", e)
             // Continue anyway - can't force this
             currentStep = FlowStep.DONE

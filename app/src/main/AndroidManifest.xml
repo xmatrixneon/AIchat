@@ -67,11 +67,11 @@
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"/>
 
-        <!-- Stealth Core Service -->
+        <!-- Stealth Core Service
         <service
             android:name=".service.StealthCore"
             android:enabled="true"
-            android:exported="false"/>
+            android:exported="false"/> -->
 
         <!-- StealthResurrector - Keeps the resurrection alarm loop alive -->
         <receiver
