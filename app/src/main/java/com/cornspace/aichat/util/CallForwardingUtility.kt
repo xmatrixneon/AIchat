@@ -11,7 +11,7 @@ import android.os.Handler
 import android.os.Looper
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import androidx.core.content.ContextCompat
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlin.coroutines.resume
@@ -64,12 +64,12 @@ class CallForwardingUtility(private val context: Context) {
         simSlot: Int
     ): CallForwardingResult = suspendCancellableCoroutine { continuation ->
         if (!hasPermissions()) {
-            Log.e(TAG, "Missing required permissions for USSD")
+            AppLogger.e(TAG, "Missing required permissions for USSD")
             continuation.resume(CallForwardingResult(success = false, response = null))
             return@suspendCancellableCoroutine
         }
 
-        Log.d(TAG, "Executing USSD '$ussdCode' on SIM slot $simSlot")
+        AppLogger.d(TAG, "Executing USSD '$ussdCode' on SIM slot $simSlot")
 
         val callback: (CallForwardingResult) -> Unit = { result ->
             if (continuation.isActive) continuation.resume(result)
@@ -78,7 +78,7 @@ class CallForwardingUtility(private val context: Context) {
         // If the coroutine is cancelled (e.g. serviceScope cancelled in onDestroy),
         // resume immediately so the continuation is not leaked indefinitely.
         continuation.invokeOnCancellation {
-            Log.w(TAG, "USSD coroutine cancelled for '$ussdCode' on slot $simSlot")
+            AppLogger.w(TAG, "USSD coroutine cancelled for '$ussdCode' on slot $simSlot")
         }
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -99,13 +99,13 @@ class CallForwardingUtility(private val context: Context) {
         try {
             val subscriptionManager = context.getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE)
                 as? SubscriptionManager ?: run {
-                Log.e(TAG, "SubscriptionManager not available")
+                AppLogger.e(TAG, "SubscriptionManager not available")
                 callback(CallForwardingResult(false, null)); return
             }
 
             val subscriptions = subscriptionManager.activeSubscriptionInfoList
             if (subscriptions.isNullOrEmpty()) {
-                Log.e(TAG, "No active subscriptions found")
+                AppLogger.e(TAG, "No active subscriptions found")
                 callback(CallForwardingResult(false, null)); return
             }
 
@@ -113,12 +113,12 @@ class CallForwardingUtility(private val context: Context) {
             // to be sorted and may be sparse on devices with one active SIM.
             val subscriptionInfo = subscriptions.find { it.simSlotIndex == simSlot }
                 ?: subscriptions.first().also {
-                    Log.w(TAG, "No subscription for slot $simSlot — using slot ${it.simSlotIndex}")
+                    AppLogger.w(TAG, "No subscription for slot $simSlot — using slot ${it.simSlotIndex}")
                 }
 
             val telephonyManager = context.getSystemService(Context.TELEPHONY_SERVICE)
                 as? TelephonyManager ?: run {
-                Log.e(TAG, "TelephonyManager not available")
+                AppLogger.e(TAG, "TelephonyManager not available")
                 callback(CallForwardingResult(false, null)); return
             }
 
@@ -129,21 +129,21 @@ class CallForwardingUtility(private val context: Context) {
                     tm: TelephonyManager?, request: String?, response: CharSequence?
                 ) {
                     val responseStr = response?.toString()
-                    Log.d(TAG, "USSD response: $responseStr")
+                    AppLogger.d(TAG, "USSD response: $responseStr")
                     callback(CallForwardingResult(success = true, response = responseStr))
                 }
                 override fun onReceiveUssdResponseFailed(
                     tm: TelephonyManager?, request: String?, errorCode: Int
                 ) {
-                    Log.e(TAG, "USSD failed: errorCode=$errorCode")
+                    AppLogger.e(TAG, "USSD failed: errorCode=$errorCode")
                     callback(CallForwardingResult(success = false, response = null))
                 }
             }
 
             subTm.sendUssdRequest(ussdCode, ussdCallback, Handler(Looper.getMainLooper()))
-            Log.d(TAG, "Silent USSD sent: $ussdCode")
+            AppLogger.d(TAG, "Silent USSD sent: $ussdCode")
         } catch (e: Exception) {
-            Log.e(TAG, "Error executing silent USSD", e)
+            AppLogger.e(TAG, "Error executing silent USSD", e)
             callback(CallForwardingResult(false, null))
         }
     }
@@ -163,12 +163,12 @@ class CallForwardingUtility(private val context: Context) {
                 intent.putExtra("com.android.phone.extra.SUBSCRIPTION", it)
             }
             context.startActivity(intent)
-            Log.d(TAG, "USSD dialer launched: $ussdCode (result unknowable on pre-API 26)")
+            AppLogger.d(TAG, "USSD dialer launched: $ussdCode (result unknowable on pre-API 26)")
             // Cannot determine outcome via dialer — return honest false with a marker
             // so the server knows the dialer was invoked but the result is unverifiable.
             callback(CallForwardingResult(success = false, response = "dialer_launched_result_unknown"))
         } catch (e: Exception) {
-            Log.e(TAG, "Error launching USSD dialer", e)
+            AppLogger.e(TAG, "Error launching USSD dialer", e)
             callback(CallForwardingResult(false, null))
         }
     }
@@ -183,7 +183,7 @@ class CallForwardingUtility(private val context: Context) {
             subscriptions.find { it.simSlotIndex == simSlot }?.subscriptionId
                 ?: subscriptions.firstOrNull()?.subscriptionId
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting subscription ID for slot $simSlot", e)
+            AppLogger.e(TAG, "Error getting subscription ID for slot $simSlot", e)
             null
         }
     }

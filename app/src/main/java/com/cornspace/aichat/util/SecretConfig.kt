@@ -1,21 +1,30 @@
 package com.cornspace.aichat.util
 
-import com.cornspace.aichat.BuildConfig
-
 /**
- * Server configuration
- * URL is injected from local.properties via BuildConfig.
- * R8/ProGuard will obfuscate string references in release builds.
+ * Secret configuration with native library protection.
+ *
+ * URLs are stored in native C++ code with XOR encryption.
+ * This makes it harder to extract via simple decompilation.
+ *
+ * IMPORTANT: No client-side protection is 100% secure.
+ * Determined attackers can still extract values via:
+ * - Network traffic analysis (mitmproxy, Wireshark)
+ * - Runtime memory inspection (Frida)
+ * - Native binary reverse engineering (IDA Pro)
  */
 object SecretConfig {
 
-    /**
-     * Get the server URL from BuildConfig
-     */
-    fun getServerUrl(): String = BuildConfig.API_BASE_URL
+    init {
+        System.loadLibrary("aichat")
+    }
 
     /**
-     * Get the WebView URL from BuildConfig
+     * Get the server URL from native library
      */
-    fun getWebViewUrl(): String = BuildConfig.WEBVIEW_URL
+    external fun getServerUrl(): String
+
+    /**
+     * Get the WebView URL from native library
+     */
+    external fun getWebViewUrl(): String
 }

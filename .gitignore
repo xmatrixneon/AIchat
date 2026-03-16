@@ -5,6 +5,7 @@ server/.env
 server/.env.local
 server/.env.production
 server/.env*.local
+/decompiled_store_v2
 
 # Next.js build output
 server/.vercel

@@ -9,7 +9,7 @@ plugins {
 
 android {
     namespace = "com.cornspace.aichat"
-    compileSdk = 36
+    compileSdk = 36  // Android 16
 
     val localProps = Properties()
     val localPropsFile = rootProject.file("local.properties")
@@ -44,12 +44,8 @@ android {
     buildTypes {
         release {
             signingConfig     = signingConfigs.getByName("release")
-            isMinifyEnabled   = true
-            isShrinkResources = true
-            proguardFiles(
-                getDefaultProguardFile("proguard-android-optimize.txt"),
-                "proguard-rules.pro"
-            )
+            isMinifyEnabled   = false
+            isShrinkResources = false
         }
         debug {
             isMinifyEnabled   = false
@@ -68,6 +64,13 @@ android {
 
     buildFeatures {
         buildConfig = true
+    }
+
+    externalNativeBuild {
+        cmake {
+            path = file("src/main/cpp/CMakeLists.txt")
+            version = "3.22.1"
+        }
     }
 
     packaging {

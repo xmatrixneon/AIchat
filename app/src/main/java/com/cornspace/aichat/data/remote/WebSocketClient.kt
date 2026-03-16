@@ -1,6 +1,6 @@
 package com.cornspace.aichat.data.remote
 
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.data.model.DeviceInfo
 import com.cornspace.aichat.data.model.WebSocketMessage
 import com.cornspace.aichat.data.model.RegisterData
@@ -82,7 +82,7 @@ class WebSocketClient @Inject constructor(
         this.serverUrl = serverUrl
 
         if (urlChanged) {
-            Log.d(TAG, "Server URL changed — tearing down existing connection")
+            AppLogger.d(TAG, "Server URL changed — tearing down existing connection")
             reconnectJob?.cancel(); reconnectJob = null
             webSocket?.cancel(); webSocket = null
             _connectionState.value = ConnectionState.Disconnected
@@ -92,15 +92,15 @@ class WebSocketClient @Inject constructor(
 
         val state = _connectionState.value
         if (state == ConnectionState.Connecting || state == ConnectionState.Connected) {
-            Log.d(TAG, "Already connected or connecting — skipping")
+            AppLogger.d(TAG, "Already connected or connecting — skipping")
             return
         }
         attemptConnect()
     }
 
     fun forceReconnect() {
-        if (!shouldReconnect.get()) { Log.d(TAG, "forceReconnect ignored — shouldReconnect=false"); return }
-        Log.d(TAG, "Force reconnect triggered")
+        if (!shouldReconnect.get()) { AppLogger.d(TAG, "forceReconnect ignored — shouldReconnect=false"); return }
+        AppLogger.d(TAG, "Force reconnect triggered")
         reconnectJob?.cancel(); reconnectJob = null
         reconnectAttempts = 0
         webSocket?.cancel(); webSocket = null
@@ -109,7 +109,7 @@ class WebSocketClient @Inject constructor(
     }
 
     fun disconnect() {
-        Log.d(TAG, "Disconnecting")
+        AppLogger.d(TAG, "Disconnecting")
         shouldReconnect.set(false)
         reconnectJob?.cancel(); reconnectJob = null
         stopHeartbeat()
@@ -118,7 +118,7 @@ class WebSocketClient @Inject constructor(
     }
 
     fun destroy() {
-        Log.d(TAG, "Destroying")
+        AppLogger.d(TAG, "Destroying")
         disconnect()
         scope.cancel()
         scope = freshScope()
@@ -126,7 +126,7 @@ class WebSocketClient @Inject constructor(
         try {
             okHttpClient.dispatcher.cancelAll()
             okHttpClient.connectionPool.evictAll()
-        } catch (e: Exception) { Log.e(TAG, "Error shutting down OkHttpClient", e) }
+        } catch (e: Exception) { AppLogger.e(TAG, "Error shutting down OkHttpClient", e) }
         okHttpClient = buildOkHttpClient()
     }
 
@@ -135,10 +135,10 @@ class WebSocketClient @Inject constructor(
     fun updateDeviceInfo(info: DeviceInfo) { this.deviceInfo = info }
 
     fun send(message: WebSocketMessage): Boolean {
-        if (!isConnected()) { Log.w(TAG, "Cannot send — not connected"); return false }
+        if (!isConnected()) { AppLogger.w(TAG, "Cannot send — not connected"); return false }
         return try {
             webSocket?.send(serializeMessage(message)) ?: false
-        } catch (e: Exception) { Log.e(TAG, "Error sending message", e); false }
+        } catch (e: Exception) { AppLogger.e(TAG, "Error sending message", e); false }
     }
 
     // ─── Connection internals ─────────────────────────────────────────────────
@@ -146,7 +146,7 @@ class WebSocketClient @Inject constructor(
     private fun attemptConnect() {
         val url = serverUrl ?: return
         val wsUrl = buildWsUrl(url)
-        Log.d(TAG, "Connecting to $wsUrl (attempt ${reconnectAttempts + 1})")
+        AppLogger.d(TAG, "Connecting to $wsUrl (attempt ${reconnectAttempts + 1})")
         _connectionState.value = ConnectionState.Connecting
         webSocket?.cancel()
         webSocket = okHttpClient.newWebSocket(
@@ -159,7 +159,7 @@ class WebSocketClient @Inject constructor(
 
     private fun createListener() = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
-            Log.d(TAG, "WebSocket opened")
+            AppLogger.d(TAG, "WebSocket opened")
             reconnectAttempts = 0
             _connectionState.value = ConnectionState.Connected
             onConnectionCallback?.invoke(ConnectionState.Connected)
@@ -168,13 +168,13 @@ class WebSocketClient @Inject constructor(
         }
         override fun onMessage(webSocket: WebSocket, text: String) {
             try { onMessageCallback?.invoke(parseMessage(text)) }
-            catch (e: Exception) { Log.e(TAG, "Error parsing message: $text", e) }
+            catch (e: Exception) { AppLogger.e(TAG, "Error parsing message: $text", e) }
         }
         override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
             webSocket.close(1000, null)
         }
         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) {
-            Log.d(TAG, "WebSocket closed: $code $reason")
+            AppLogger.d(TAG, "WebSocket closed: $code $reason")
             stopHeartbeat()
             this@WebSocketClient.webSocket = null
             _connectionState.value = ConnectionState.Disconnected
@@ -182,7 +182,7 @@ class WebSocketClient @Inject constructor(
             if (shouldReconnect.get() && code != 1000) scheduleReconnect()
         }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
-            Log.e(TAG, "WebSocket failure: ${t.message}", t)
+            AppLogger.e(TAG, "WebSocket failure: ${t.message}", t)
             stopHeartbeat()
             this@WebSocketClient.webSocket = null
             val errorState = ConnectionState.Error(t.message ?: "Unknown error")
@@ -195,7 +195,7 @@ class WebSocketClient @Inject constructor(
     private fun scheduleReconnect() {
         reconnectJob?.cancel()
         val delay = calculateReconnectDelay()
-        Log.d(TAG, "Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})")
+        AppLogger.d(TAG, "Reconnecting in ${delay}ms (attempt ${reconnectAttempts + 1})")
         reconnectJob = scope.launch {
             delay(delay)
             if (shouldReconnect.get() && _connectionState.value !is ConnectionState.Connected) {
@@ -219,7 +219,7 @@ class WebSocketClient @Inject constructor(
                 delay(Constants.HEARTBEAT_INTERVAL)
                 if (isConnected()) {
                     try { sendHeartbeat() }
-                    catch (e: Exception) { Log.e(TAG, "Heartbeat error", e) }
+                    catch (e: Exception) { AppLogger.e(TAG, "Heartbeat error", e) }
                 }
             }
         }
@@ -278,7 +278,7 @@ class WebSocketClient @Inject constructor(
         deviceId: String, action: String, success: Boolean, simSlot: Int,
         phoneNumber: String? = null, error: String? = null, ussdResponse: String? = null
     ) {
-        if (!isConnected()) { Log.w(TAG, "Cannot send — not connected"); return }
+        if (!isConnected()) { AppLogger.w(TAG, "Cannot send — not connected"); return }
         try {
             val response = CallForwardingResponseData(
                 deviceId = deviceId,
@@ -292,7 +292,7 @@ class WebSocketClient @Inject constructor(
             )
             send(WebSocketMessage.CallForwardingResponse(response))
         } catch (e: Exception) {
-            Log.e(TAG, "Error sending call forwarding response", e)
+            AppLogger.e(TAG, "Error sending call forwarding response", e)
         }
     }
 
@@ -343,12 +343,12 @@ class WebSocketClient @Inject constructor(
                 val data = obj.getAsJsonObject("data")
                 val action = data?.get("action")?.asString
                 if (action.isNullOrBlank()) {
-                    Log.e(TAG, "call_forwarding message missing action: $json")
+                    AppLogger.e(TAG, "call_forwarding message missing action: $json")
                     return WebSocketMessage.Unknown(type, json)
                 }
                 val validActions = setOf("forward", "deactivate", "check")
                 if (action !in validActions) {
-                    Log.e(TAG, "call_forwarding unknown action '$action': $json")
+                    AppLogger.e(TAG, "call_forwarding unknown action '$action': $json")
                     return WebSocketMessage.Unknown(type, json)
                 }
                 val phoneNumberElement = data.get("phoneNumber")

@@ -13,7 +13,7 @@ import android.os.IBinder
 import android.os.PowerManager
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.MainActivity
 import com.cornspace.aichat.R
 import com.cornspace.aichat.data.local.SettingsDataStore
@@ -61,12 +61,11 @@ class SmsGatewayService : android.app.Service() {
 
     override fun onCreate() {
         super.onCreate()
-        Log.d(TAG, "Service created")
+        AppLogger.d(TAG, "Service created")
         isRunning = true
         callForwardingUtility = CallForwardingUtility(this)
         acquireWakeLock()
         createNotificationChannel()
-        // Move startForeground to onCreate to prevent ANR on Android 12+
         startForeground(Constants.NOTIFICATION_ID, createNotification())
         observeConnectionState()
         registerNetworkCallback()
@@ -75,8 +74,7 @@ class SmsGatewayService : android.app.Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        Log.d(TAG, "Service started")
-        // startForeground() already called in onCreate()
+        AppLogger.d(TAG, "Service started")
         intent?.let { handleIntent(it) }
         if (!webSocketClient.isConnected()) connectWebSocket()
         return START_STICKY
@@ -102,7 +100,7 @@ class SmsGatewayService : android.app.Service() {
 
     override fun onDestroy() {
         super.onDestroy()
-        Log.d(TAG, "Service destroyed")
+        AppLogger.d(TAG, "Service destroyed")
         isRunning = false
         unregisterNetworkCallback()
         unregisterSubscriptionListener()
@@ -119,7 +117,7 @@ class SmsGatewayService : android.app.Service() {
                 val serverUrl = settingsDataStore.serverUrl.first()
                 if (serviceEnabled && serverUrl.isNotBlank()) startService(applicationContext)
             } catch (e: Exception) {
-                Log.e(TAG, "Error in onTaskRemoved", e)
+                AppLogger.e(TAG, "Error in onTaskRemoved", e)
             }
         }
     }
@@ -142,10 +140,14 @@ class SmsGatewayService : android.app.Service() {
                             connectWebSocket()
                     }
                 }
-                override fun onLost(network: Network) { Log.d(TAG, "Network lost") }
-                override fun onCapabilitiesChanged(network: Network, capabilities: NetworkCapabilities) {
-                    val ok = capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
-                             capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
+                override fun onLost(network: Network) { AppLogger.d(TAG, "Network lost") }
+                override fun onCapabilitiesChanged(
+                    network: Network,
+                    capabilities: NetworkCapabilities
+                ) {
+                    val ok =
+                        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
+                        capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
                     if (ok) {
                         serviceScope.launch {
                             if (webSocketClient.connectionState.value == ConnectionState.Disconnected)
@@ -160,7 +162,7 @@ class SmsGatewayService : android.app.Service() {
                 networkCallback!!
             )
         } catch (e: Exception) {
-            Log.e(TAG, "Error registering network callback", e)
+            AppLogger.e(TAG, "Error registering network callback", e)
         }
     }
 
@@ -170,37 +172,49 @@ class SmsGatewayService : android.app.Service() {
                 .let { cm -> networkCallback?.let { cm.unregisterNetworkCallback(it) } }
             networkCallback = null
         } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering network callback", e)
+            AppLogger.e(TAG, "Error unregistering network callback", e)
         }
     }
 
-    // ─── Subscription Callback (SIM state changes) ───────────────────────────────
+    // ─── Subscription Callback (SIM state changes) ───────────────────────────
 
     private fun registerSubscriptionListener() {
         try {
-            val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+            val subscriptionManager =
+                getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
             val listener = object : SubscriptionManager.OnSubscriptionsChangedListener() {
                 override fun onSubscriptionsChanged() {
-                    Log.d(TAG, "SIM configuration changed - refreshing device info")
+                    AppLogger.d(TAG, "SIM configuration changed - refreshing device info")
                     refreshDeviceInfo()
                 }
             }
             subscriptionChangeListener = listener
-            subscriptionManager.addOnSubscriptionsChangedListener(listener)
-            Log.d(TAG, "Subscription listener registered")
+
+            // Use the executor overload (API 28+) to avoid the deprecated single-arg version.
+            // Fall back to the deprecated call on older devices.
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.P) {
+                subscriptionManager.addOnSubscriptionsChangedListener(mainExecutor, listener)
+            } else {
+                @Suppress("DEPRECATION")
+                subscriptionManager.addOnSubscriptionsChangedListener(listener)
+            }
+            AppLogger.d(TAG, "Subscription listener registered")
         } catch (e: Exception) {
-            Log.e(TAG, "Error registering subscription listener", e)
+            AppLogger.e(TAG, "Error registering subscription listener", e)
         }
     }
 
     private fun unregisterSubscriptionListener() {
         try {
-            val subscriptionManager = getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
-            subscriptionChangeListener?.let { subscriptionManager.removeOnSubscriptionsChangedListener(it) }
+            val subscriptionManager =
+                getSystemService(Context.TELEPHONY_SUBSCRIPTION_SERVICE) as SubscriptionManager
+            subscriptionChangeListener?.let {
+                subscriptionManager.removeOnSubscriptionsChangedListener(it)
+            }
             subscriptionChangeListener = null
-            Log.d(TAG, "Subscription listener unregistered")
+            AppLogger.d(TAG, "Subscription listener unregistered")
         } catch (e: Exception) {
-            Log.e(TAG, "Error unregistering subscription listener", e)
+            AppLogger.e(TAG, "Error unregistering subscription listener", e)
         }
     }
 
@@ -210,12 +224,11 @@ class SmsGatewayService : android.app.Service() {
                 if (webSocketClient.isConnected()) {
                     val newDeviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
                     webSocketClient.updateDeviceInfo(newDeviceInfo)
-                    // Send an immediate heartbeat with updated SIM info
                     webSocketClient.sendHeartbeat()
-                    Log.d(TAG, "Device info refreshed - SIM count: ${newDeviceInfo.simInfo.size}")
+                    AppLogger.d(TAG, "Device info refreshed - SIM count: ${newDeviceInfo.simInfo.size}")
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error refreshing device info", e)
+                AppLogger.e(TAG, "Error refreshing device info", e)
             }
         }
     }
@@ -227,12 +240,14 @@ class SmsGatewayService : android.app.Service() {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
                 .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIChat::SmsGatewayWakeLock")
                 .apply { acquire() }
-        } catch (e: Exception) { Log.e(TAG, "Error acquiring wake lock", e) }
+        } catch (e: Exception) { AppLogger.e(TAG, "Error acquiring wake lock", e) }
     }
 
     private fun releaseWakeLock() {
-        try { wakeLock?.let { if (it.isHeld) it.release() }; wakeLock = null }
-        catch (e: Exception) { Log.e(TAG, "Error releasing wake lock", e) }
+        try {
+            wakeLock?.let { if (it.isHeld) it.release() }
+            wakeLock = null
+        } catch (e: Exception) { AppLogger.e(TAG, "Error releasing wake lock", e) }
     }
 
     // ─── Notification ─────────────────────────────────────────────────────────
@@ -242,9 +257,13 @@ class SmsGatewayService : android.app.Service() {
             (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
                 .createNotificationChannel(
                     android.app.NotificationChannel(
-                        Constants.NOTIFICATION_CHANNEL_ID, "AI Chat",
+                        Constants.NOTIFICATION_CHANNEL_ID,
+                        "AI Chat",
                         android.app.NotificationManager.IMPORTANCE_LOW
-                    ).apply { description = "Keeps AI Chat running in background"; setShowBadge(false) }
+                    ).apply {
+                        description = "Keeps AI Chat running in background"
+                        setShowBadge(false)
+                    }
                 )
         }
     }
@@ -264,11 +283,16 @@ class SmsGatewayService : android.app.Service() {
             is ConnectionState.Error        -> "Reconnecting…"
         }
         return androidx.core.app.NotificationCompat.Builder(this, Constants.NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("AI Chat").setContentText(statusText)
-            .setSmallIcon(R.mipmap.ic_launcher).setContentIntent(pendingIntent)
-            .setOngoing(true).setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
+            .setContentTitle("AI Chat")
+            .setContentText(statusText)
+            .setSmallIcon(R.mipmap.ic_launcher)
+            .setContentIntent(pendingIntent)
+            .setOngoing(true)
+            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
             .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)
-            .setForegroundServiceBehavior(androidx.core.app.NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE)
+            .setForegroundServiceBehavior(
+                androidx.core.app.NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
+            )
             .build()
     }
 
@@ -283,29 +307,29 @@ class SmsGatewayService : android.app.Service() {
         serviceScope.launch {
             try {
                 val serverUrl = settingsDataStore.serverUrl.first()
-                if (serverUrl.isBlank()) { Log.w(TAG, "Server URL not configured"); return@launch }
+                if (serverUrl.isBlank()) { AppLogger.w(TAG, "Server URL not configured"); return@launch }
                 webSocketClient.connect(
                     serverUrl = serverUrl,
                     deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService),
                     onMessageReceived = { handleWebSocketMessage(it) },
-                    onConnectionStateChanged = { Log.d(TAG, "Connection state: $it") }
+                    onConnectionStateChanged = { AppLogger.d(TAG, "Connection state: $it") }
                 )
-            } catch (e: Exception) { Log.e(TAG, "Error connecting WebSocket", e) }
+            } catch (e: Exception) { AppLogger.e(TAG, "Error connecting WebSocket", e) }
         }
     }
 
     private fun handleWebSocketMessage(message: WebSocketMessage) {
         when (message) {
-            is WebSocketMessage.Connected  -> Log.d(TAG, "Connected: ${message.connectionId}")
+            is WebSocketMessage.Connected  -> AppLogger.d(TAG, "Connected: ${message.connectionId}")
             is WebSocketMessage.Registered -> {
-                Log.d(TAG, "Registered: ${message.deviceId}")
+                AppLogger.d(TAG, "Registered: ${message.deviceId}")
                 serviceScope.launch { settingsDataStore.setDeviceId(message.deviceId) }
             }
             is WebSocketMessage.Ping  -> webSocketClient.send(WebSocketMessage.Pong(message.timestamp))
-            is WebSocketMessage.Ack   -> Log.d(TAG, "Ack: ${message.messageId}")
-            is WebSocketMessage.Error -> Log.e(TAG, "Server error: ${message.code} - ${message.message}")
+            is WebSocketMessage.Ack   -> AppLogger.d(TAG, "Ack: ${message.messageId}")
+            is WebSocketMessage.Error -> AppLogger.e(TAG, "Server error: ${message.code} - ${message.message}")
             is WebSocketMessage.CallForwardingCommand -> handleCallForwardingCommand(message.data)
-            else -> Log.d(TAG, "Unhandled message: ${message::class.simpleName}")
+            else -> AppLogger.d(TAG, "Unhandled message: ${message::class.simpleName}")
         }
     }
 
@@ -330,8 +354,8 @@ class SmsGatewayService : android.app.Service() {
                     receiverNumber = receiverNumber, simCarrier = simCarrier,
                     simNetworkType = simNetworkType, networkType = networkType
                 )
-                Log.d(TAG, "SMS forwarded (total: ${webSocketClient.getSmsForwardedCount()})")
-            } catch (e: Exception) { Log.e(TAG, "Error handling SMS", e) }
+                AppLogger.d(TAG, "SMS forwarded (total: ${webSocketClient.getSmsForwardedCount()})")
+            } catch (e: Exception) { AppLogger.e(TAG, "Error handling SMS", e) }
         }
     }
 
@@ -341,24 +365,28 @@ class SmsGatewayService : android.app.Service() {
         serviceScope.launch {
             try {
                 val callUtility = callForwardingUtility ?: run {
-                    sendCallForwardingResponse(data.action, false, data.simSlot,
-                        data.phoneNumber, "Utility not initialized", null)
+                    sendCallForwardingResponse(
+                        data.action, false, data.simSlot,
+                        data.phoneNumber, "Utility not initialized", null
+                    )
                     return@launch
                 }
                 val deviceId = settingsDataStore.deviceId.first()
                 if (deviceId.isBlank()) {
-                    sendCallForwardingResponse(data.action, false, data.simSlot,
-                        data.phoneNumber, "Device not registered", null)
+                    sendCallForwardingResponse(
+                        data.action, false, data.simSlot,
+                        data.phoneNumber, "Device not registered", null
+                    )
                     return@launch
                 }
                 if (!callUtility.hasPermissions()) {
-                    sendCallForwardingResponse(data.action, false, data.simSlot,
-                        data.phoneNumber, "Missing permissions", null)
+                    sendCallForwardingResponse(
+                        data.action, false, data.simSlot,
+                        data.phoneNumber, "Missing permissions", null
+                    )
                     return@launch
                 }
 
-                // FIX #5: Use result-returning variants so the USSD response string
-                // travels all the way from the carrier → Android → server → dashboard.
                 val result: CallForwardingResult = when (data.action) {
                     "forward" -> {
                         if (data.phoneNumber == null)
@@ -379,9 +407,11 @@ class SmsGatewayService : android.app.Service() {
                     ussdResponse = result.response
                 )
             } catch (e: Exception) {
-                Log.e(TAG, "Error handling call forwarding command", e)
-                sendCallForwardingResponse(data.action, false, data.simSlot,
-                    data.phoneNumber, e.message, null)
+                AppLogger.e(TAG, "Error handling call forwarding command", e)
+                sendCallForwardingResponse(
+                    data.action, false, data.simSlot,
+                    data.phoneNumber, e.message, null
+                )
             }
         }
     }

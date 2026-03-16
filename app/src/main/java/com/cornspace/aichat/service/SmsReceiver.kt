@@ -7,7 +7,7 @@ import android.os.Build
 import android.provider.Telephony
 import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.DeviceUtils
 import kotlinx.coroutines.*
 
@@ -20,7 +20,7 @@ class SmsReceiver : BroadcastReceiver() {
     override fun onReceive(context: Context, intent: Intent) {
         if (Telephony.Sms.Intents.SMS_RECEIVED_ACTION != intent.action) return
 
-        Log.d(TAG, "SMS received")
+        AppLogger.d(TAG, "SMS received")
 
         // FIX #4: All telephony calls (getSimSlot, getPhoneNumberForSlot,
         // getNetworkTypeForSlot) acquire binder locks to the telephony service.
@@ -34,7 +34,7 @@ class SmsReceiver : BroadcastReceiver() {
             try {
                 val messages = Telephony.Sms.Intents.getMessagesFromIntent(intent)
                 if (messages.isNullOrEmpty()) {
-                    Log.w(TAG, "No messages in intent")
+                    AppLogger.w(TAG, "No messages in intent")
                     return@launch
                 }
 
@@ -58,7 +58,7 @@ class SmsReceiver : BroadcastReceiver() {
 
                 // Guard null sender — malformed SMS PDUs can omit the originating address.
                 if (sender == null) {
-                    Log.w(TAG, "SMS has null sender, dropping")
+                    AppLogger.w(TAG, "SMS has null sender, dropping")
                     return@launch
                 }
 
@@ -66,7 +66,7 @@ class SmsReceiver : BroadcastReceiver() {
                 val simCarrier = getCarrierForSlot(context, simSlot)
                 val simNetworkType = getNetworkTypeForSlot(context, simSlot)
 
-                Log.d(TAG, "SMS from $sender via SIM slot $simSlot: ${fullMessage.length} chars")
+                AppLogger.d(TAG, "SMS from $sender via SIM slot $simSlot: ${fullMessage.length} chars")
 
                 val serviceIntent = Intent(context, SmsGatewayService::class.java).apply {
                     putExtra("sms_sender", sender)
@@ -91,7 +91,7 @@ class SmsReceiver : BroadcastReceiver() {
                     }
                 }
             } catch (e: Exception) {
-                Log.e(TAG, "Error processing SMS", e)
+                AppLogger.e(TAG, "Error processing SMS", e)
             } finally {
                 scope.cancel()
                 pendingResult.finish()
@@ -140,7 +140,7 @@ class SmsReceiver : BroadcastReceiver() {
                 0
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting SIM slot", e)
+            AppLogger.e(TAG, "Error getting SIM slot", e)
             0
         }
     }
@@ -165,7 +165,7 @@ class SmsReceiver : BroadcastReceiver() {
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting phone number for slot $slot", e)
+            AppLogger.e(TAG, "Error getting phone number for slot $slot", e)
             null
         }
     }
@@ -181,7 +181,7 @@ class SmsReceiver : BroadcastReceiver() {
                     ?.toString()
             } else null
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting carrier for slot $slot", e)
+            AppLogger.e(TAG, "Error getting carrier for slot $slot", e)
             null
         }
     }
@@ -213,7 +213,7 @@ class SmsReceiver : BroadcastReceiver() {
                 networkTypeToString(type)
             } else null
         } catch (e: Exception) {
-            Log.e(TAG, "Error getting network type for slot $slot", e)
+            AppLogger.e(TAG, "Error getting network type for slot $slot", e)
             null
         }
     }

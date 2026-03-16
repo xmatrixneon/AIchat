@@ -6,7 +6,7 @@ import android.content.Context
 import android.content.Intent
 import android.os.Build
 import android.os.SystemClock
-import android.util.Log
+import com.cornspace.aichat.util.AppLogger
 import com.cornspace.aichat.util.Constants.RESURRECTION_ALARM_INTERVAL
 
 /**
@@ -35,9 +35,9 @@ object StealthCore {
     fun startResurrectionLoop(context: Context) {
         try {
             scheduleNextAlarm(context)
-            Log.d(TAG, "Resurrection loop started — next alarm in ${RESURRECTION_ALARM_INTERVAL}ms")
+            AppLogger.d(TAG, "Resurrection loop started — next alarm in ${RESURRECTION_ALARM_INTERVAL}ms")
         } catch (e: Exception) {
-            Log.e(TAG, "Error starting resurrection loop", e)
+            AppLogger.e(TAG, "Error starting resurrection loop", e)
         }
     }
 
@@ -48,13 +48,13 @@ object StealthCore {
         try {
             val alarmManager = context.getSystemService(Context.ALARM_SERVICE) as AlarmManager
             val pendingIntent = buildPendingIntent(context, PendingIntent.FLAG_NO_CREATE) ?: run {
-                Log.d(TAG, "No resurrection alarm to cancel")
+                AppLogger.d(TAG, "No resurrection alarm to cancel")
                 return
             }
             alarmManager.cancel(pendingIntent)
-            Log.d(TAG, "Resurrection loop stopped")
+            AppLogger.d(TAG, "Resurrection loop stopped")
         } catch (e: Exception) {
-            Log.e(TAG, "Error stopping resurrection loop", e)
+            AppLogger.e(TAG, "Error stopping resurrection loop", e)
         }
     }
 
@@ -83,7 +83,7 @@ object StealthCore {
                 pendingIntent
             )
         }
-        Log.d(TAG, "Next resurrection alarm scheduled for ${RESURRECTION_ALARM_INTERVAL}ms from now")
+        AppLogger.d(TAG, "Next resurrection alarm scheduled for ${RESURRECTION_ALARM_INTERVAL}ms from now")
     }
 
     private fun buildPendingIntent(context: Context, flags: Int): PendingIntent? =
