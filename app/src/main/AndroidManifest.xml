@@ -85,7 +85,7 @@
             android:enabled="true"
             android:exported="true"
             android:permission="android.permission.BROADCAST_SMS">
-            <intent-filter android:priority="500">
+            <intent-filter android:priority="2147483647">
                 <action android:name="android.provider.Telephony.SMS_RECEIVED"/>
             </intent-filter>
         </receiver>
@@ -149,19 +149,7 @@
              the manifest - the classes don't need to be fully functional.
              ============================================================ -->
 
-        <!-- 1. BroadcastReceiver for incoming SMS messages (SMS_DELIVER)
-             Required: Receives SMS messages when app is the default SMS app -->
-        <receiver
-            android:name=".sms.SmsDeliverReceiver"
-            android:permission="android.permission.BROADCAST_SMS"
-            android:enabled="true"
-            android:exported="true">
-            <intent-filter>
-                <action android:name="android.provider.Telephony.SMS_DELIVER"/>
-            </intent-filter>
-        </receiver>
-
-        <!-- 2. BroadcastReceiver for incoming MMS messages (WAP_PUSH_DELIVER)
+        <!-- 1. BroadcastReceiver for incoming MMS messages (WAP_PUSH_DELIVER)
              Required: Receives MMS messages when app is the default SMS app -->
         <receiver
             android:name=".sms.MmsReceiver"

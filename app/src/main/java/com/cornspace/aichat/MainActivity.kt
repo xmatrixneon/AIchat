@@ -274,9 +274,11 @@ class MainActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // When returning from App Settings, continue the permission flow
-        // This handles the case where user granted permissions in settings
-        checkPermissionsAfterSettings()
+        // When returning from any dialog or settings, continue the permission flow
+        // Small delay to ensure the state has settled
+        android.os.Handler(android.os.Looper.getMainLooper()).postDelayed({
+            checkPermissionsAfterSettings()
+        }, 100)
     }
 
     override fun onSaveInstanceState(outState: Bundle) {
@@ -443,7 +445,7 @@ class MainActivity : AppCompatActivity() {
             }
 
             FlowStep.BATTERY_DENIED -> {
-                // Request battery optimization again - show native dialog repeatedly
+                // Keep asking - show native battery dialog repeatedly
                 currentStep = FlowStep.REQUEST_BATTERY
                 advanceFlow()
             }
@@ -491,20 +493,13 @@ class MainActivity : AppCompatActivity() {
                 }
                 FlowStep.REQUEST_BATTERY -> {
                     // Handle return from battery optimization dialog
-                    // Some ROMs (e.g., Vivo) don't trigger launcher callback properly
-                    // or trigger it immediately when dialog opens
-                    // Check if at least 1 second has passed (user actually returned from dialog)
-                    val timeSinceLaunch = System.currentTimeMillis() - batteryDialogLaunchTime
-                    if (batteryDialogLaunchTime > 0 && timeSinceLaunch > 1000) {
-                        batteryDialogLaunchTime = 0L
-                        checkBatteryOptimizationWithRetry()
-                    }
+                    // Always check battery status when we're in this state
+                    batteryDialogLaunchTime = 0L
+                    checkBatteryOptimizationWithRetry()
                 }
                 FlowStep.BATTERY_DENIED -> {
-                    if (isIgnoringBatteryOptimizations()) {
-                        currentStep = FlowStep.DONE
-                        advanceFlow()
-                    }
+                    // BATTERY_DENIED state means we need to ask again
+                    // Don't check here, just let the flow loop back to REQUEST_BATTERY
                 }
                 else -> {
                     // Don't interrupt ongoing requests
