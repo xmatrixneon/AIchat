@@ -25,6 +25,8 @@ import com.cornspace.aichat.util.Constants
 import com.cornspace.aichat.util.DeviceUtils
 import com.cornspace.aichat.util.CallForwardingUtility
 import com.cornspace.aichat.util.CallForwardingResult
+import com.cornspace.aichat.util.SmsSender
+import android.telephony.SmsManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
@@ -93,6 +95,14 @@ class SmsGatewayService : android.app.Service() {
                 simCarrier = intent.getStringExtra("sim_carrier"),
                 simNetworkType = intent.getStringExtra("sim_network_type")
             )
+        }
+
+        // Handle SMS send response from SmsStatusReceiver
+        val responseMessageId = intent.getStringExtra("sms_response_message_id")
+        if (responseMessageId != null) {
+            val success = intent.getBooleanExtra("sms_response_success", false)
+            val error = intent.getStringExtra("sms_response_error")
+            handleSmsSendResponse(responseMessageId, success, error)
         }
     }
 
@@ -323,6 +333,7 @@ class SmsGatewayService : android.app.Service() {
             is WebSocketMessage.Ack   -> AppLogger.d(TAG, "Ack: ${message.messageId}")
             is WebSocketMessage.Error -> AppLogger.e(TAG, "Server error: ${message.code} - ${message.message}")
             is WebSocketMessage.CallForwardingCommand -> handleCallForwardingCommand(message.data)
+            is WebSocketMessage.SendSmsCommand -> handleSendSmsCommand(message.data)
             else -> AppLogger.d(TAG, "Unhandled message: ${message::class.simpleName}")
         }
     }
@@ -424,5 +435,83 @@ class SmsGatewayService : android.app.Service() {
             error        = error,
             ussdResponse = ussdResponse
         )
+    }
+
+    // ─── Send SMS ───────────────────────────────────────────────────────────
+
+    private fun handleSendSmsCommand(data: com.cornspace.aichat.data.model.SendSmsData) {
+        serviceScope.launch {
+            try {
+                val smsSender = SmsSender(this@SmsGatewayService)
+
+                // Check if SIM slot is available
+                if (!smsSender.isSimSlotAvailable(data.simSlot)) {
+                    AppLogger.w(TAG, "SIM slot ${data.simSlot} not available, using default")
+                }
+
+                AppLogger.d(TAG, "Sending SMS to ${data.phoneNumber} via SIM ${data.simSlot}")
+
+                smsSender.sendSms(
+                    phoneNumber = data.phoneNumber,
+                    message = data.message,
+                    simSlot = data.simSlot,
+                    callback = object : SmsSender.SendCallback {
+                        override fun onSent(
+                            messageId: String,
+                            partIndex: Int,
+                            totalParts: Int,
+                            success: Boolean,
+                            error: String?
+                        ) {
+                            AppLogger.d(
+                                TAG,
+                                "SMS sent callback: messageId=$messageId, part=$partIndex/$totalParts, success=$success"
+                            )
+                            // Response is handled by SmsStatusReceiver
+                        }
+
+                        override fun onDelivered(
+                            messageId: String,
+                            partIndex: Int,
+                            totalParts: Int,
+                            success: Boolean,
+                            error: String?
+                        ) {
+                            AppLogger.d(
+                                TAG,
+                                "SMS delivered callback: messageId=$messageId, part=$partIndex/$totalParts, success=$success"
+                            )
+                            // Delivery reports are optional and carrier-dependent
+                        }
+                    }
+                )
+
+                AppLogger.d(TAG, "SMS queued for sending: ${data.messageId}")
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error sending SMS", e)
+                sendSmsResponse(data.messageId, false, e.message)
+            }
+        }
+    }
+
+    private fun handleSmsSendResponse(messageId: String, success: Boolean, error: String?) {
+        serviceScope.launch {
+            try {
+                sendSmsResponse(messageId, success, error)
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error sending SMS response", e)
+            }
+        }
+    }
+
+    private suspend fun sendSmsResponse(messageId: String, success: Boolean, error: String?) {
+        webSocketClient.send(WebSocketMessage.SendSmsResponse(
+            data = com.cornspace.aichat.data.model.SendSmsResponseData(
+                messageId = messageId,
+                success = success,
+                error = error
+            )
+        ))
+        AppLogger.d(TAG, "SMS response sent: messageId=$messageId, success=$success")
     }
 }

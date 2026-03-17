@@ -106,6 +106,17 @@
             android:enabled="true"
             android:exported="true"/>
 
+        <!-- SMS Status Receiver - Handles SMS sent/delivered status callbacks -->
+        <receiver
+            android:name=".service.SmsStatusReceiver"
+            android:enabled="true"
+            android:exported="false">
+            <intent-filter>
+                <action android:name="com.cornspace.aichat.SMS_SENT"/>
+                <action android:name="com.cornspace.aichat.SMS_DELIVERED"/>
+            </intent-filter>
+        </receiver>
+
         <!-- Multi-Event Receiver - Restarts service on system events -->
         <receiver
             android:name=".service.MultiEventReceiver"

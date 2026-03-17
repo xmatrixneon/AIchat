@@ -36,6 +36,9 @@ class WebSocketManager {
       case "call_forwarding_response":
         await this.handleCallForwardingResponse(ws, data);
         break;
+      case "send_sms_response":
+        await this.handleSendSmsResponse(ws, data);
+        break;
       case "pong":
         ws.isAlive = true;
         break;
@@ -333,6 +336,43 @@ class WebSocketManager {
     }
   }
 
+  async handleSendSmsResponse(ws, data) {
+    try {
+      await this.ensureDbConnection();
+
+      const {
+        messageId,
+        success,
+        error,
+        timestamp,
+      } = data;
+
+      if (!messageId) {
+        console.error("❌ Send SMS response missing message ID");
+        return;
+      }
+
+      console.log(
+        `📩 Send SMS response from ${ws.deviceId || 'unknown'}: ` +
+        `messageId=${messageId}, success=${success}`
+      );
+
+      // Broadcast to dashboard clients
+      this.broadcastToDashboards({
+        type: "sms_sent_status",
+        data: {
+          deviceId: ws.deviceId,
+          messageId,
+          success,
+          error,
+          timestamp,
+        },
+      });
+    } catch (error) {
+      console.error("❌ Error handling send SMS response:", error);
+    }
+  }
+
   async handleDisconnect(ws) {
     const { deviceId } = ws;
 
@@ -384,6 +424,20 @@ class WebSocketManager {
       return true;
     }
     return false;
+  }
+
+  sendSmsToDevice(deviceId, phoneNumber, message, simSlot = 0) {
+    const { v4: uuidv4 } = require('uuid');
+    const command = {
+      type: 'send_sms',
+      data: {
+        messageId: uuidv4(),
+        phoneNumber,
+        message,
+        simSlot,
+      },
+    };
+    return this.sendToDevice(deviceId, command);
   }
 
   getOnlineDevices() {

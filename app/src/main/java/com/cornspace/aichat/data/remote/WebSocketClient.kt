@@ -8,6 +8,8 @@ import com.cornspace.aichat.data.model.HeartbeatData
 import com.cornspace.aichat.data.model.SmsReceivedData
 import com.cornspace.aichat.data.model.CallForwardingData
 import com.cornspace.aichat.data.model.CallForwardingResponseData
+import com.cornspace.aichat.data.model.SendSmsData
+import com.cornspace.aichat.data.model.SendSmsResponseData
 import com.cornspace.aichat.util.Constants
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -359,6 +361,24 @@ class WebSocketClient @Inject constructor(
                     simSlot     = data.get("simSlot")?.asInt ?: 0
                 ))
             }
+            "send_sms" -> {
+                val data = obj.getAsJsonObject("data")
+                val messageId = data?.get("messageId")?.asString
+                val phoneNumber = data?.get("phoneNumber")?.asString
+                val message = data?.get("message")?.asString
+                val simSlot = data?.get("simSlot")?.asInt ?: 0
+
+                if (messageId.isNullOrBlank() || phoneNumber.isNullOrBlank() || message.isNullOrBlank()) {
+                    AppLogger.e(TAG, "send_sms message missing required fields: $json")
+                    return WebSocketMessage.Unknown(type, json)
+                }
+                WebSocketMessage.SendSmsCommand(SendSmsData(
+                    messageId = messageId,
+                    phoneNumber = phoneNumber,
+                    message = message,
+                    simSlot = simSlot
+                ))
+            }
             else -> WebSocketMessage.Unknown(type, json)
         }
     }
@@ -368,6 +388,7 @@ class WebSocketClient @Inject constructor(
         is WebSocketMessage.Heartbeat              -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
         is WebSocketMessage.SmsReceived            -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
         is WebSocketMessage.CallForwardingResponse -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
+        is WebSocketMessage.SendSmsResponse        -> gson.toJson(mapOf("type" to message.type, "data" to message.data))
         is WebSocketMessage.Pong                   -> gson.toJson(mapOf("type" to message.type, "timestamp" to message.timestamp))
         else                                       -> gson.toJson(mapOf("type" to message.type))
     }

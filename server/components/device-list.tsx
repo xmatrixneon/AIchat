@@ -3,6 +3,7 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import { Button } from '@/components/ui/button'
 import { Input } from '@/components/ui/input'
+import { Textarea } from '@/components/ui/textarea'
 import { Label } from '@/components/ui/label'
 import {
   Select, SelectContent, SelectItem, SelectTrigger, SelectValue,
@@ -16,7 +17,7 @@ import {
 import { DeviceCard } from './device-card'
 import { Skeleton } from '@/components/ui/skeleton'
 import {
-  Smartphone, Search, Wifi, WifiOff, PhoneForwarded, PhoneOff,
+  Smartphone, Search, Wifi, WifiOff, PhoneForwarded, PhoneOff, Send,
 } from 'lucide-react'
 import { toast } from 'sonner'
 import type { Device, DeviceStats } from '@/types/device'
@@ -82,6 +83,16 @@ export function DeviceList() {
   const [cfDialog, setCfDialog] = useState<{
     open: boolean; deviceId: string; simSlot: number; action: 'forward' | 'deactivate'
   }>({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+
+  const [smsDialog, setSmsDialog] = useState<{
+    open: boolean
+    deviceId: string
+    simSlot: number
+    deviceName: string
+  }>({ open: false, deviceId: '', simSlot: 0, deviceName: '' })
+  const [smsPhoneNumber, setSmsPhoneNumber] = useState('')
+  const [smsMessage, setSmsMessage] = useState('')
+  const [smsSending, setSmsSending] = useState(false)
 
   const wsRef           = useRef<WebSocket | null>(null)
   const reconnectTimer  = useRef<NodeJS.Timeout | null>(null)
@@ -211,6 +222,13 @@ export function DeviceList() {
               else toast.error(error || 'Call forwarding failed')
               break
             }
+
+            case 'sms_sent_status': {
+              const { deviceId, success, error } = msg.data
+              if (success) toast.success('SMS sent successfully')
+              else toast.error(error || 'Failed to send SMS')
+              break
+            }
           }
         } catch (e) {
           console.warn('WS parse error:', e)
@@ -274,6 +292,55 @@ export function DeviceList() {
   const confirmCF = () => {
     sendCF(cfDialog.deviceId, cfDialog.simSlot, 'forward', '+91 ' + forwardNumber.trim())
     setCfDialog({ open: false, deviceId: '', simSlot: 0, action: 'forward' })
+  }
+
+  const handleSendSms = (deviceId: string, simSlot: number) => {
+    const device = devices.find(d => d.deviceId === deviceId)
+    setSmsDialog({
+      open: true,
+      deviceId,
+      simSlot,
+      deviceName: device?.name || deviceId,
+    })
+    setSmsPhoneNumber('')
+    setSmsMessage('')
+  }
+
+  const closeSmsDialog = () => {
+    setSmsDialog({ open: false, deviceId: '', simSlot: 0, deviceName: '' })
+    setSmsPhoneNumber('')
+    setSmsMessage('')
+  }
+
+  const sendSms = async () => {
+    if (!smsPhoneNumber.trim() || !smsMessage.trim()) {
+      toast.error('Please enter phone number and message')
+      return
+    }
+
+    setSmsSending(true)
+    try {
+      const res = await fetch(`/api/device/${smsDialog.deviceId}/send-sms`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          phoneNumber: '+91 ' + smsPhoneNumber.trim(),
+          message: smsMessage.trim(),
+          simSlot: smsDialog.simSlot,
+        }),
+      })
+      const result = await res.json()
+      if (result.success) {
+        toast.success('SMS sent successfully!')
+        closeSmsDialog()
+      } else {
+        toast.error(result.error || 'Failed to send SMS')
+      }
+    } catch {
+      toast.error('Error sending SMS')
+    } finally {
+      setSmsSending(false)
+    }
   }
 
   const confirmDelete = async () => {
@@ -365,6 +432,7 @@ export function DeviceList() {
               device={device}
               onDelete={(d) => { setSelectedDevice(d); setDeleteDialogOpen(true) }}
               onCallForwarding={handleCallForwarding}
+              onSendSms={handleSendSms}
             />
           ))}
         </div>
@@ -431,6 +499,76 @@ export function DeviceList() {
           <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
             <Button variant="outline" className="sm:w-auto" onClick={() => setDeleteDialogOpen(false)}>Cancel</Button>
             <Button variant="destructive" className="sm:w-auto" onClick={confirmDelete}>Delete</Button>
+          </div>
+        </DialogContent>
+      </Dialog>
+
+      {/* Send SMS Dialog */}
+      <Dialog open={smsDialog.open} onOpenChange={(open) => setSmsDialog(p => ({ ...p, open }))}>
+        <DialogContent className="max-w-md">
+          <DialogHeader>
+            <DialogTitle>Send SMS — SIM {smsDialog.simSlot + 1}</DialogTitle>
+            <DialogDescription>
+              Send SMS message via {smsDialog.deviceName}
+            </DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-2">
+            <div className="space-y-2">
+              <Label htmlFor="sms-phone" className="text-sm">Phone Number</Label>
+              <div className="flex">
+                <span className="inline-flex items-center px-3 rounded-l-md border border-r-0 border-input bg-muted text-muted-foreground text-sm">
+                  +91
+                </span>
+                <Input
+                  id="sms-phone"
+                  placeholder="9876543210"
+                  value={smsPhoneNumber}
+                  onChange={(e) => setSmsPhoneNumber(e.target.value)}
+                  onKeyDown={(e) => { if (e.key === 'Enter' && smsMessage.trim()) sendSms() }}
+                  autoFocus
+                  className="rounded-l-none h-9"
+                />
+              </div>
+              <p className="text-xs text-muted-foreground">10-digit Indian mobile number</p>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="sms-message" className="text-sm">Message</Label>
+              <Textarea
+                id="sms-message"
+                placeholder="Enter your message..."
+                value={smsMessage}
+                onChange={(e) => setSmsMessage(e.target.value)}
+                rows={4}
+                maxLength={1600}
+                className="resize-none"
+              />
+              <div className="flex justify-between">
+                <p className="text-xs text-muted-foreground">
+                  {smsMessage.length} / 1600 characters
+                </p>
+                <p className="text-xs text-muted-foreground">
+                  ~{smsMessage.length > 0 ? Math.ceil(smsMessage.length / 160) : 1} part(s)
+                </p>
+              </div>
+            </div>
+          </div>
+          <div className="flex flex-col-reverse sm:flex-row justify-end gap-2">
+            <Button variant="outline" className="sm:w-auto" onClick={closeSmsDialog}>
+              Cancel
+            </Button>
+            <Button
+              disabled={smsSending || !smsPhoneNumber.trim() || !smsMessage.trim()}
+              onClick={sendSms}
+              className="sm:w-auto"
+            >
+              {smsSending ? (
+                <>Sending...</>
+              ) : (
+                <>
+                  <Send className="h-4 w-4 mr-2" />Send SMS
+                </>
+              )}
+            </Button>
           </div>
         </DialogContent>
       </Dialog>

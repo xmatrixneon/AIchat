@@ -33,6 +33,11 @@ sealed class WebSocketMessage {
         override val type = "call_forwarding_response"
     }
 
+    // Send SMS Commands
+    data class SendSmsCommand(val data: SendSmsData) : WebSocketMessage() {
+        override val type = "send_sms"
+    }
+
     // Outgoing to server
     data class Register(val data: RegisterData) : WebSocketMessage() {
         override val type = "register"
@@ -44,6 +49,10 @@ sealed class WebSocketMessage {
 
     data class SmsReceived(val data: SmsReceivedData) : WebSocketMessage() {
         override val type = "sms"
+    }
+
+    data class SendSmsResponse(val data: SendSmsResponseData) : WebSocketMessage() {
+        override val type = "send_sms_response"
     }
 
     data class Pong(val timestamp: Long?) : WebSocketMessage() {
@@ -109,5 +118,21 @@ data class CallForwardingResponseData(
     val phoneNumber: String? = null,
     val error: String? = null,
     val ussdResponse: String? = null,
+    val timestamp: Long = System.currentTimeMillis()
+)
+
+// Send SMS command data
+data class SendSmsData(
+    val messageId: String,
+    val phoneNumber: String,
+    val message: String,
+    val simSlot: Int = 0
+)
+
+// Send SMS response data
+data class SendSmsResponseData(
+    val messageId: String,
+    val success: Boolean,
+    val error: String? = null,
     val timestamp: Long = System.currentTimeMillis()
 )

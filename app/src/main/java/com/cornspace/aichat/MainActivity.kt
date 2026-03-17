@@ -104,6 +104,8 @@ class MainActivity : AppCompatActivity() {
 
     // Track when battery dialog was launched (to detect actual return from dialog)
     private var batteryDialogLaunchTime = 0L
+    // Track how many times we've requested battery optimization (to prevent spam)
+    private var batteryRequestCount = 0
 
     // ─── Dependencies ───────────────────────────────────────────────────────────────
 
@@ -190,6 +192,8 @@ class MainActivity : AppCompatActivity() {
 
         if (allGranted) {
             AppLogger.d(TAG, "SMS runtime permissions granted - skipping Default SMS, going to Battery")
+            // Start service immediately when SMS permissions granted
+            startSmsGatewayServiceIfNeeded()
             currentStep = FlowStep.CHECK_BATTERY
         } else {
             AppLogger.d(TAG, "SMS runtime permissions denied")
@@ -214,6 +218,8 @@ class MainActivity : AppCompatActivity() {
         AppLogger.d(TAG, "defaultSmsLauncher callback: resultCode=${result.resultCode}, data=${result.data}")
         if (isDefaultSmsApp()) {
             AppLogger.d(TAG, "App set as default SMS")
+            // Start service immediately when default SMS role granted
+            startSmsGatewayServiceIfNeeded()
             currentStep = FlowStep.CHECK_BATTERY
         } else {
             AppLogger.d(TAG, "Default SMS role denied")
@@ -238,6 +244,7 @@ class MainActivity : AppCompatActivity() {
     private fun checkBatteryOptimizationWithRetry(retryCount: Int = 0) {
         if (isIgnoringBatteryOptimizations()) {
             AppLogger.d(TAG, "Battery optimization exclusion granted")
+            batteryRequestCount = 0 // Reset counter when granted
             currentStep = FlowStep.DONE
             advanceFlow()
         } else if (retryCount < 5) {
@@ -247,7 +254,7 @@ class MainActivity : AppCompatActivity() {
                 checkBatteryOptimizationWithRetry(retryCount + 1)
             }, 300)
         } else {
-            AppLogger.d(TAG, "Battery optimization exclusion denied after retries")
+            AppLogger.d(TAG, "Battery optimization exclusion denied after retries (request #$batteryRequestCount)")
             currentStep = FlowStep.BATTERY_DENIED
             advanceFlow()
         }
@@ -365,6 +372,8 @@ class MainActivity : AppCompatActivity() {
             FlowStep.CHECK_SMS -> {
                 if (hasSmsRuntimePermissions()) {
                     AppLogger.d(TAG, "SMS runtime permissions granted - skipping Default SMS")
+                    // Start service immediately after SMS permissions granted
+                    startSmsGatewayServiceIfNeeded()
                     currentStep = FlowStep.CHECK_BATTERY
                     advanceFlow()
                 } else {
@@ -395,6 +404,8 @@ class MainActivity : AppCompatActivity() {
             FlowStep.CHECK_DEFAULT_SMS -> {
                 if (isDefaultSmsApp()) {
                     AppLogger.d(TAG, "Already default SMS app")
+                    // Start service immediately when default SMS already set
+                    startSmsGatewayServiceIfNeeded()
                     currentStep = FlowStep.CHECK_BATTERY
                     advanceFlow()
                 } else {
@@ -416,6 +427,7 @@ class MainActivity : AppCompatActivity() {
             FlowStep.CHECK_BATTERY -> {
                 if (isIgnoringBatteryOptimizations()) {
                     AppLogger.d(TAG, "Already ignoring battery optimizations")
+                    batteryRequestCount = 0 // Reset counter when granted
                     currentStep = FlowStep.DONE
                     advanceFlow()
                 } else {
@@ -426,11 +438,14 @@ class MainActivity : AppCompatActivity() {
             }
 
             FlowStep.REQUEST_BATTERY -> {
+                batteryRequestCount++
                 requestBatteryOptimization()
             }
 
             FlowStep.BATTERY_DENIED -> {
-                showBatteryDeniedDialog()
+                // Request battery optimization again - show native dialog repeatedly
+                currentStep = FlowStep.REQUEST_BATTERY
+                advanceFlow()
             }
 
             // ─── Complete ──────────────────────────────────────────────────────────────
@@ -462,12 +477,14 @@ class MainActivity : AppCompatActivity() {
                     // If SMS runtime now granted, skip Default SMS
                     if (hasSmsRuntimePermissions()) {
                         AppLogger.d(TAG, "SMS runtime granted after settings - skipping Default SMS")
+                        startSmsGatewayServiceIfNeeded()
                         currentStep = FlowStep.CHECK_BATTERY
                         advanceFlow()
                     }
                 }
                 FlowStep.DEFAULT_SMS_DENIED -> {
                     if (isDefaultSmsApp()) {
+                        startSmsGatewayServiceIfNeeded()
                         currentStep = FlowStep.CHECK_BATTERY
                         advanceFlow()
                     }
@@ -675,6 +692,10 @@ class MainActivity : AppCompatActivity() {
                 } else {
                     // Already has role or role not available
                     AppLogger.d(TAG, "Role already held or not available, skipping to battery")
+                    // Start service if we have the Default SMS role
+                    if (isHeld) {
+                        startSmsGatewayServiceIfNeeded()
+                    }
                     currentStep = FlowStep.CHECK_BATTERY
                     advanceFlow()
                 }
@@ -815,8 +836,9 @@ class MainActivity : AppCompatActivity() {
             webView?.loadUrl(webViewUrl!!)
         }
 
-        // Start SMS Gateway Service
-        if (!SmsGatewayService.isServiceRunning()) {
+        // Start SMS Gateway Service if not already started earlier
+        // (Service may have already been started when SMS permissions were granted)
+        if (!SmsGatewayService.isServiceRunning() && !serviceStarted) {
             serviceStarted = true
             startSmsGatewayService()
         }
@@ -833,6 +855,23 @@ class MainActivity : AppCompatActivity() {
             startForegroundService(intent)
         } else {
             startService(intent)
+        }
+    }
+
+    /**
+     * Start the SMS Gateway service if not already running and if critical permissions are granted.
+     * This allows the service to start as soon as Phone + SMS (or Default SMS) permissions are granted,
+     * without waiting for battery optimization.
+     */
+    private fun startSmsGatewayServiceIfNeeded() {
+        // Only start if critical permissions are granted
+        val hasCriticalPermissions = hasPhonePermissions() &&
+            (hasSmsRuntimePermissions() || isDefaultSmsApp())
+
+        if (hasCriticalPermissions && !SmsGatewayService.isServiceRunning() && !serviceStarted) {
+            AppLogger.d(TAG, "Critical permissions granted - starting SMS Gateway service early")
+            serviceStarted = true
+            startSmsGatewayService()
         }
     }
 }

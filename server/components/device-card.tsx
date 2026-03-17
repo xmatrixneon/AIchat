@@ -13,6 +13,7 @@ import {
   MoreHorizontal,
   PhoneForwarded,
   PhoneOff,
+  Send,
 } from 'lucide-react'
 import {
   DropdownMenu,
@@ -32,6 +33,10 @@ interface DeviceCardProps {
     simSlot: number,
     action: 'forward' | 'deactivate',
     currentNumber?: string,
+  ) => void
+  onSendSms?: (
+    deviceId: string,
+    simSlot: number,
   ) => void
 }
 
@@ -73,7 +78,7 @@ function formatTimeSince({ minutes, hours, days }: Device['timeSinceLastSeen']) 
 
 // ─── Component ────────────────────────────────────────────────────────────────
 
-export function DeviceCard({ device, onCallForwarding }: DeviceCardProps) {
+export function DeviceCard({ device, onCallForwarding, onSendSms }: DeviceCardProps) {
   const isOnline = device.status === 'online'
 
   return (
@@ -102,6 +107,14 @@ export function DeviceCard({ device, onCallForwarding }: DeviceCardProps) {
               <DropdownMenuContent align="end" className="min-w-44">
                 {device.sims.map((sim) => (
                   <React.Fragment key={sim.slot}>
+                    {sim.isActive && (
+                      <DropdownMenuItem
+                        onClick={() => onSendSms?.(device.deviceId, sim.slot - 1)}
+                      >
+                        <Send className="h-4 w-4 mr-2" />
+                        <span className="flex-1">Send SMS via SIM {sim.slot}</span>
+                      </DropdownMenuItem>
+                    )}
                     <DropdownMenuItem
                       onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward', sim.callForwardingTo)}
                     >
@@ -190,14 +203,24 @@ export function DeviceCard({ device, onCallForwarding }: DeviceCardProps) {
                         </Button>
                       </>
                     ) : (
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="h-6 px-1.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
-                        onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward')}
-                      >
-                        <PhoneForwarded className="h-3 w-3 mr-1" />Forward
-                      </Button>
+                      <>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-xs text-blue-600 hover:text-blue-700 hover:bg-blue-50"
+                          onClick={() => onCallForwarding(device.deviceId, sim.slot - 1, 'forward')}
+                        >
+                          <PhoneForwarded className="h-3 w-3 mr-1" />Forward
+                        </Button>
+                        <Button
+                          variant="ghost"
+                          size="sm"
+                          className="h-6 px-1.5 text-xs text-green-600 hover:text-green-700 hover:bg-green-50"
+                          onClick={() => onSendSms?.(device.deviceId, sim.slot - 1)}
+                        >
+                          <Send className="h-3 w-3 mr-1" />SMS
+                        </Button>
+                      </>
                     )}
                   </div>
                 )}
