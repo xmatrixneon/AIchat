@@ -134,6 +134,15 @@ class WebSocketClient @Inject constructor(
 
     fun isConnected(): Boolean = _connectionState.value == ConnectionState.Connected
 
+    /**
+     * Check if the WebSocket connection is healthy and ready for communication.
+     * Returns true only if connected (not connecting, disconnected, or in error state).
+     */
+    fun isConnectionHealthy(): Boolean {
+        val state = _connectionState.value
+        return state == ConnectionState.Connected && webSocket != null
+    }
+
     fun updateDeviceInfo(info: DeviceInfo) { this.deviceInfo = info }
 
     fun send(message: WebSocketMessage): Boolean {

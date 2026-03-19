@@ -156,11 +156,12 @@ async function fetchPanelData(panel) {
 // 🔄 Sync device-based numbers from active devices
 async function syncDeviceNumbers() {
   try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // 60 second timeout to reduce device status flip-flopping
+    const offlineTimeout = new Date(Date.now() - 60 * 1000);
 
     // Find all active devices
     const activeDevices = await Device.find({ isActive: true });
-    const offlineDevices = activeDevices.filter(device => device.lastHeartbeat < fiveMinutesAgo);
+    const offlineDevices = activeDevices.filter(device => device.lastHeartbeat < offlineTimeout);
 
     console.log(`📱 Processing ${activeDevices.length} active devices (${offlineDevices.length} offline)`);
 
@@ -172,7 +173,7 @@ async function syncDeviceNumbers() {
 
     // Process each active device
     for (const device of activeDevices) {
-      const isOnline = device.lastHeartbeat >= fiveMinutesAgo;
+      const isOnline = device.lastHeartbeat >= offlineTimeout;
 
       // Update device status based on heartbeat
       const newStatus = isOnline ? 'online' : 'offline';

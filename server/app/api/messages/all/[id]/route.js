@@ -14,7 +14,7 @@ export async function DELETE(req, { params }) {
       return NextResponse.json({ error: err.error }, { status: err.status || 401 })
     }
 
-    const { id } = params
+    const { id } = await params
 
     // ✅ Validate ID exists
     if (!id) {

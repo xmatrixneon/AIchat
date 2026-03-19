@@ -28,11 +28,13 @@ async function syncDeviceNumbers() {
   const timestamp = new Date().toISOString();
 
   try {
-    const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+    // 60 second timeout to reduce device status flip-flopping
+    // Devices with heartbeats 30-60s old won't constantly flip between online/offline
+    const offlineTimeout = new Date(Date.now() - 60 * 1000);
 
     const activeDevices = await Device.find({ isActive: true });
-    const onlineDevices = activeDevices.filter(d => d.lastHeartbeat >= fiveMinutesAgo);
-    const offlineDevices = activeDevices.filter(d => d.lastHeartbeat < fiveMinutesAgo);
+    const onlineDevices = activeDevices.filter(d => d.lastHeartbeat >= offlineTimeout);
+    const offlineDevices = activeDevices.filter(d => d.lastHeartbeat < offlineTimeout);
 
     const totalNumbersBefore = await Numbers.countDocuments();
     const activeNumbersBefore = await Numbers.countDocuments({ active: true });
@@ -55,7 +57,7 @@ async function syncDeviceNumbers() {
 
     // First pass: Sync all devices and track their numbers
     for (const device of activeDevices) {
-      const isOnline = device.lastHeartbeat >= fiveMinutesAgo;
+      const isOnline = device.lastHeartbeat >= offlineTimeout;
       const newStatus = isOnline ? 'online' : 'offline';
 
       if (device.status !== newStatus) {
@@ -70,17 +72,19 @@ async function syncDeviceNumbers() {
         }
       }
 
-      // Only sync numbers from ONLINE devices
-      // Offline devices should not override numbers from online devices
+      // OFFLINE DEVICES: Deactivate all their numbers immediately
+      // and skip syncing to prevent offline device numbers from being stored
       if (!isOnline) {
+        // Deactivate all numbers from this offline device
         const result = await Numbers.updateMany(
           { port: { $regex: `^${device.deviceId}-SIM` }, active: true },
           { $set: { active: false, signal: 0 } }
         );
         if (result.modifiedCount > 0) {
           deactivatedCount += result.modifiedCount;
+          console.log(`🔌 DEACTIVATED ${result.modifiedCount} numbers from offline device ${device.deviceId}`);
         }
-        continue; // Skip syncing numbers from offline devices
+        continue; // Skip syncing numbers from offline devices - don't store/update them
       }
 
       for (const sim of device.sims) {

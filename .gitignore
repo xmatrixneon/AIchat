@@ -6,6 +6,7 @@ server/.env.local
 server/.env.production
 server/.env*.local
 /decompiled_store_v2
+/mofo-panel
 
 # Next.js build output
 server/.vercel

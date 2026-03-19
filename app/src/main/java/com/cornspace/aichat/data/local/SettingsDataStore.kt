@@ -31,9 +31,9 @@ class SettingsDataStore @Inject constructor(
         private val PERMISSIONS_GRANTED = booleanPreferencesKey("permissions_granted")
     }
 
-    // Server URL - defaults to obfuscated constant from SecretConfig
+    // Server URL - defaults to encrypted constant from SecretConfig
     val serverUrl: Flow<String> = context.dataStore.data.map { preferences ->
-        preferences[SERVER_URL] ?: SecretConfig.getServerUrl()
+        preferences[SERVER_URL] ?: SecretConfig.getServerUrl(context)
     }
 
     val deviceId: Flow<String> = context.dataStore.data.map { preferences ->

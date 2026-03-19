@@ -51,8 +51,12 @@ class StealthResurrector : BroadcastReceiver() {
                     return@launch
                 }
 
-                // Restart the gateway service if it was killed.
-                if (!SmsGatewayService.isServiceRunning()) {
+                // Check if service needs to be restarted
+                val serviceRunning = SmsGatewayService.isServiceRunning()
+                val wsHealthy = SmsGatewayService.isWebSocketHealthy()
+
+                if (!serviceRunning) {
+                    // Service was killed - restart it
                     AppLogger.w(TAG, "SmsGatewayService not running — restarting")
                     val serviceIntent = Intent(context, SmsGatewayService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
@@ -60,8 +64,19 @@ class StealthResurrector : BroadcastReceiver() {
                     } else {
                         context.startService(serviceIntent)
                     }
+                } else if (!wsHealthy) {
+                    // Service running but WebSocket is unhealthy - force reconnect
+                    AppLogger.w(TAG, "SmsGatewayService running but WebSocket unhealthy — forcing reconnect")
+                    // The service will auto-reconnect on its next heartbeat check,
+                    // but we can trigger an immediate reconnection attempt
+                    val serviceIntent = Intent(context, SmsGatewayService::class.java)
+                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
+                        context.startForegroundService(serviceIntent)
+                    } else {
+                        context.startService(serviceIntent)
+                    }
                 } else {
-                    AppLogger.d(TAG, "SmsGatewayService already running — no restart needed")
+                    AppLogger.d(TAG, "SmsGatewayService running and WebSocket healthy — no action needed")
                 }
 
                 // Keep the chain alive by scheduling the next alarm.

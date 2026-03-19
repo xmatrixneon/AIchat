@@ -9,7 +9,7 @@ object Constants {
     const val NOTIFICATION_ID         = 1
 
     // WebSocket
-    const val HEARTBEAT_INTERVAL      = 60_000L  // 60 seconds
+    const val HEARTBEAT_INTERVAL      = 30_000L  // 30 seconds (aligned with server heartbeat check)
     const val CONNECTION_TIMEOUT      = 30_000L  // 30 seconds
     const val RECONNECT_DELAY_INITIAL = 1_000L   // 1 second
     const val RECONNECT_DELAY_MAX     = 60_000L  // 60 seconds

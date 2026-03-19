@@ -40,7 +40,7 @@ class WebSocketManager {
         await this.handleSendSmsResponse(ws, data);
         break;
       case "pong":
-        ws.isAlive = true;
+        await this.handlePong(ws, data);
         break;
       default:
         console.log(`⚠️ Unknown message type: ${type}`);
@@ -194,6 +194,25 @@ class WebSocketManager {
       });
     } catch (error) {
       console.error("❌ Error handling heartbeat:", error);
+    }
+  }
+
+  async handlePong(ws, data) {
+    // Mark connection as alive for server heartbeat check
+    ws.isAlive = true;
+
+    // Also update database lastHeartbeat to keep device status accurate
+    const { deviceId } = ws;
+    if (deviceId) {
+      try {
+        await this.ensureDbConnection();
+        await Device.findOneAndUpdate(
+          { deviceId },
+          { $set: { lastHeartbeat: new Date(), lastSeen: new Date() } }
+        );
+      } catch (error) {
+        console.error("❌ Error handling pong:", error);
+      }
     }
   }
 

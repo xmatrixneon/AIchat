@@ -15,6 +15,11 @@ const tokenSchema = new mongoose.Schema({
     type: String,
     default: 'unknown',
   },
+  clientType: {
+    type: String,
+    enum: ['admin', 'mobile'],
+    default: 'admin',
+  },
   createdAt: {
     type: Date,
     default: Date.now,

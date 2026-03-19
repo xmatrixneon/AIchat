@@ -164,14 +164,9 @@ export function DeviceList() {
                   ...(networkType    != null && { networkType }),
                 })
               })
-              setStats(prev => {
-                if (!prev) return prev
-                return {
-                  ...prev,
-                  online:  status === 'online' ? prev.online + 1 : Math.max(0, prev.online - 1),
-                  offline: status === 'online' ? Math.max(0, prev.offline - 1) : prev.offline + 1,
-                }
-              })
+              // FIX: Don't manually adjust stats.counts - let fetchDevices() fetch accurate stats from DB
+              // This fixes race condition where WebSocket and API polling conflict, causing counts to jump around
+              fetchDevices() // Refresh stats from DB to get accurate counts
               toast[status === 'online' ? 'success' : 'warning'](`${name || deviceId} is now ${status}`, { duration: 3000 })
               break
             }

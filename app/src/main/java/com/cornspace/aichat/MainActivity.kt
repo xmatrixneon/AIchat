@@ -265,6 +265,9 @@ class MainActivity : AppCompatActivity() {
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
+        // Initialize secure encryption for URLs
+        SecretConfig.initialize(this)
+
         // Setup WebView UI first (but don't load URL until permissions granted)
         setupWebView()
 
@@ -749,7 +752,7 @@ class MainActivity : AppCompatActivity() {
      * This saves resources by not initializing the renderer process until needed.
      */
     private fun setupWebView() {
-        webViewUrl = SecretConfig.getWebViewUrl()
+        webViewUrl = SecretConfig.getWebViewUrl(this)
 
         if (webViewUrl.isNullOrBlank()) {
             // No URL configured - use empty container

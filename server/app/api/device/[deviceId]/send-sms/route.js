@@ -50,10 +50,11 @@ export async function POST(request, { params }) {
     }
 
     // Validate phone number format (basic check)
+    // Allow short codes (3+ digits) and regular phone numbers
     const sanitizedPhone = phoneNumber.replace(/[^+\d]/g, '');
-    if (sanitizedPhone.length < 5 || sanitizedPhone.length > 20) {
+    if (sanitizedPhone.length < 3 || sanitizedPhone.length > 20) {
       return NextResponse.json(
-        { success: false, error: 'Invalid phone number format' },
+        { success: false, error: 'Invalid phone number format (must be 3-20 digits)' },
         { status: 400 }
       );
     }

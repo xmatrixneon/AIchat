@@ -44,10 +44,14 @@ class SmsGatewayService : android.app.Service() {
     private var subscriptionChangeListener: SubscriptionManager.OnSubscriptionsChangedListener? = null
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
+    // Track current network type for detecting network switches
+    @Volatile private var currentNetworkType: String? = null
+
     companion object {
         private const val TAG = "SmsGatewayService"
 
         @Volatile private var isRunning = false
+        @Volatile private var instance: SmsGatewayService? = null
 
         fun startService(context: Context) {
             val intent = Intent(context, SmsGatewayService::class.java)
@@ -59,12 +63,22 @@ class SmsGatewayService : android.app.Service() {
             context.stopService(Intent(context, SmsGatewayService::class.java))
 
         fun isServiceRunning(): Boolean = isRunning
+
+        /**
+         * Check if the WebSocket connection is healthy.
+         * Returns false if service not running or WebSocket not connected.
+         */
+        fun isWebSocketHealthy(): Boolean {
+            val serviceInstance = instance ?: return false
+            return serviceInstance.webSocketClient.isConnectionHealthy()
+        }
     }
 
     override fun onCreate() {
         super.onCreate()
         AppLogger.d(TAG, "Service created")
         isRunning = true
+        instance = this
         callForwardingUtility = CallForwardingUtility(this)
         acquireWakeLock()
         createNotificationChannel()
@@ -112,6 +126,8 @@ class SmsGatewayService : android.app.Service() {
         super.onDestroy()
         AppLogger.d(TAG, "Service destroyed")
         isRunning = false
+        instance = null
+        currentNetworkType = null
         unregisterNetworkCallback()
         unregisterSubscriptionListener()
         webSocketClient.destroy()
@@ -150,19 +166,41 @@ class SmsGatewayService : android.app.Service() {
                             connectWebSocket()
                     }
                 }
-                override fun onLost(network: Network) { AppLogger.d(TAG, "Network lost") }
+                override fun onLost(network: Network) {
+                    AppLogger.d(TAG, "Network lost")
+                    currentNetworkType = null
+                }
                 override fun onCapabilitiesChanged(
                     network: Network,
                     capabilities: NetworkCapabilities
                 ) {
-                    val ok =
+                    val hasInternet =
                         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_INTERNET) &&
                         capabilities.hasCapability(NetworkCapabilities.NET_CAPABILITY_VALIDATED)
-                    if (ok) {
-                        serviceScope.launch {
-                            if (webSocketClient.connectionState.value == ConnectionState.Disconnected)
-                                connectWebSocket()
+
+                    if (hasInternet) {
+                        // Detect network type change (WiFi ↔ Cellular)
+                        val newNetworkType = when {
+                            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_WIFI) -> "wifi"
+                            capabilities.hasTransport(NetworkCapabilities.TRANSPORT_CELLULAR) -> "cellular"
+                            else -> "other"
                         }
+
+                        val previousType = currentNetworkType
+                        val networkChanged = previousType != null && previousType != newNetworkType
+
+                        if (networkChanged) {
+                            AppLogger.d(TAG, "Network type changed: $previousType → $newNetworkType — forcing reconnect")
+                            // Small delay to allow network to stabilize
+                            serviceScope.launch {
+                                delay(1500)
+                                webSocketClient.forceReconnect()
+                            }
+                        } else if (webSocketClient.connectionState.value == ConnectionState.Disconnected) {
+                            serviceScope.launch { connectWebSocket() }
+                        }
+
+                        currentNetworkType = newNetworkType
                     }
                 }
             }

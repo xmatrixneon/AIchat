@@ -6,7 +6,7 @@ import { NextResponse } from 'next/server';
 export async function GET(request, { params }) {
   try {
     await connectDB();
-    const { deviceId } = params;
+    const { deviceId } = await params;
 
     const device = await Device.findOne({ deviceId }).select('-__v -apiKey');
     if (!device) {
@@ -46,7 +46,7 @@ export async function GET(request, { params }) {
 export async function PUT(request, { params }) {
   try {
     await connectDB();
-    const { deviceId } = params;
+    const { deviceId } = await params;
     const body = await request.json();
 
     // FIX #6: Strip all fields that must never be overwritten by an API caller.
@@ -103,7 +103,7 @@ export async function PUT(request, { params }) {
 export async function DELETE(request, { params }) {
   try {
     await connectDB();
-    const { deviceId } = params;
+    const { deviceId } = await params;
 
     const device = await Device.findOneAndDelete({ deviceId });
     if (!device) {

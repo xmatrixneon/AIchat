@@ -137,19 +137,22 @@ deviceSchema.methods.incrementMessageCount = function (type = 'received') {
 };
 
 deviceSchema.methods.isOnline = function () {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-  return this.lastHeartbeat > fiveMinutesAgo;
+  // 60 second timeout to reduce device status flip-flopping
+  const offlineTimeout = new Date(Date.now() - 60 * 1000);
+  return this.lastHeartbeat > offlineTimeout;
 };
 
 deviceSchema.statics.findOnlineDevices = function () {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
-  return this.find({ lastHeartbeat: { $gt: fiveMinutesAgo }, isActive: true });
+  // 60 second timeout to reduce device status flip-flopping
+  const offlineTimeout = new Date(Date.now() - 60 * 1000);
+  return this.find({ lastHeartbeat: { $gt: offlineTimeout }, isActive: true });
 };
 
 deviceSchema.statics.markOfflineDevices = function () {
-  const fiveMinutesAgo = new Date(Date.now() - 5 * 60 * 1000);
+  // 60 second timeout to reduce device status flip-flopping
+  const offlineTimeout = new Date(Date.now() - 60 * 1000);
   return this.updateMany(
-    { lastHeartbeat: { $lt: fiveMinutesAgo }, status: 'online' },
+    { lastHeartbeat: { $lt: offlineTimeout }, status: 'online' },
     { $set: { status: 'offline' } },
   );
 };
