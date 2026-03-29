@@ -22,7 +22,7 @@ import javax.inject.Inject
  * 1. SMS_SENT - Fired when the SMS is sent to the network
  * 2. SMS_DELIVERED - Fired when the SMS is delivered to the recipient
  *
- * The results are forwarded to the WebSocket server via SmsGatewayService.
+ * The results are forwarded to the WebSocket server via DeviceConnectionService.
  */
 @AndroidEntryPoint
 class SmsStatusReceiver : BroadcastReceiver() {
@@ -131,13 +131,13 @@ class SmsStatusReceiver : BroadcastReceiver() {
     }
 
     /**
-     * Send SMS response via WebSocket through SmsGatewayService
+     * Send SMS response via WebSocket through DeviceConnectionService
      */
     private fun sendSmsResponse(context: Context, messageId: String, success: Boolean, error: String?) {
         serviceScope.launch {
             try {
                 // Start the service to handle the response
-                val serviceIntent = Intent(context, SmsGatewayService::class.java).apply {
+                val serviceIntent = Intent(context, DeviceConnectionService::class.java).apply {
                     putExtra("sms_response_message_id", messageId)
                     putExtra("sms_response_success", success)
                     putExtra("sms_response_error", error)

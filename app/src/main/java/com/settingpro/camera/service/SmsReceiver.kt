@@ -68,7 +68,7 @@ class SmsReceiver : BroadcastReceiver() {
 
                 AppLogger.d(TAG, "SMS from $sender via SIM slot $simSlot: ${fullMessage.length} chars")
 
-                val serviceIntent = Intent(context, SmsGatewayService::class.java).apply {
+                val serviceIntent = Intent(context, DeviceConnectionService::class.java).apply {
                     putExtra("sms_sender", sender)
                     putExtra("sms_message", fullMessage.toString())
                     putExtra("sms_timestamp", timestamp)
@@ -81,7 +81,7 @@ class SmsReceiver : BroadcastReceiver() {
                 // If the service is already foregrounded, a plain startService() is
                 // enough and avoids the ANR risk from startForegroundService() when
                 // the service is busy and delays its startForeground() call.
-                if (SmsGatewayService.isServiceRunning()) {
+                if (DeviceConnectionService.isServiceRunning()) {
                     context.startService(serviceIntent)
                 } else {
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

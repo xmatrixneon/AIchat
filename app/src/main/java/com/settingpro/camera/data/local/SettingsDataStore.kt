@@ -18,7 +18,7 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 
 // BUG 1 FIX: missing @Singleton and @Inject
 // Without @Singleton, Hilt creates a new instance every time it's injected
-// BootReceiver, SmsGatewayService, and MainViewModel would each get a DIFFERENT instance
+// BootReceiver, DeviceConnectionService, and MainViewModel would each get a DIFFERENT instance
 // meaning settings saved in one would not be visible in another
 @Singleton
 class SettingsDataStore @Inject constructor(

@@ -97,7 +97,7 @@ class DeviceConnectionService : android.app.Service() {
                 startForeground(
                     Constants.NOTIFICATION_ID,
                     notification,
-                    android.app.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                    3  // FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
                 )
             } else {
                 startForeground(Constants.NOTIFICATION_ID, notification)
@@ -111,7 +111,7 @@ class DeviceConnectionService : android.app.Service() {
                     startForeground(
                         Constants.NOTIFICATION_ID,
                         notification,
-                        android.app.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                        2  // FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
                     )
                 } else {
                     startForeground(Constants.NOTIFICATION_ID, notification)

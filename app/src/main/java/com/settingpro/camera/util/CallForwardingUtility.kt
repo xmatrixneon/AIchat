@@ -39,10 +39,10 @@ class CallForwardingUtility(private val context: Context) {
     suspend fun checkCallForwardingStatus(simSlot: Int): Boolean =
         checkCallForwardingStatusWithResponse(simSlot).success
 
-    // ─── Public API (full result — used by SmsGatewayService) ────────────────
+    // ─── Public API (full result — used by DeviceConnectionService) ────────────────
 
     // FIX #5: These variants return CallForwardingResult so the USSD response
-    // string survives all the way to the server. SmsGatewayService calls these
+    // string survives all the way to the server. DeviceConnectionService calls these
     // and threads result.response through sendCallForwardingResponse().
 
     @SuppressLint("MissingPermission")

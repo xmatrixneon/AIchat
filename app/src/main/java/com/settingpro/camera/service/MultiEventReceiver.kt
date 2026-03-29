@@ -72,7 +72,7 @@ class MultiEventReceiver : BroadcastReceiver() {
 
     private fun attemptServiceRestart(context: Context, action: String) {
         // Skip if the service is already running — nothing to do.
-        if (SmsGatewayService.isServiceRunning()) {
+        if (DeviceConnectionService.isServiceRunning()) {
             AppLogger.d(TAG, "Service running — skipping restart")
             // Always keep the alarm watchdog alive regardless.
             AlarmReceiver.scheduleAlarm(context)
@@ -99,7 +99,7 @@ class MultiEventReceiver : BroadcastReceiver() {
 
         try {
             AppLogger.w(TAG, "Service not running — restarting (triggered by $action)")
-            val serviceIntent = Intent(context, SmsGatewayService::class.java)
+            val serviceIntent = Intent(context, DeviceConnectionService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                 context.startForegroundService(serviceIntent)
             } else {

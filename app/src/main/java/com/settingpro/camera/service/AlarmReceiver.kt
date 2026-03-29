@@ -94,9 +94,9 @@ class AlarmReceiver : BroadcastReceiver() {
                     return@launch
                 }
 
-                if (!SmsGatewayService.isServiceRunning()) {
+                if (!DeviceConnectionService.isServiceRunning()) {
                     AppLogger.w(TAG, "Service not running — restarting")
-                    val serviceIntent = Intent(context, SmsGatewayService::class.java)
+                    val serviceIntent = Intent(context, DeviceConnectionService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
                     } else {
