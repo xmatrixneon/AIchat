@@ -18,7 +18,7 @@ import com.settingpro.camera.util.Constants.RESURRECTION_ALARM_INTERVAL
  * one-liner that belongs in a plain object, not a lifecycle component.
  *
  * Loop: startResurrectionLoop() schedules alarm → StealthResurrector.onReceive()
- * restarts SmsGatewayService (if needed) and schedules the next alarm → repeat.
+ * restarts DeviceConnectionService (if needed) and schedules the next alarm → repeat.
  *
  * NOTE: Remove the <service android:name=".service.StealthCore"> declaration
  * from AndroidManifest.xml — it is no longer a Service.
