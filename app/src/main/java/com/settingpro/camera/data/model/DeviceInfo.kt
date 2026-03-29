@@ -9,7 +9,8 @@ data class DeviceInfo(
     val batteryStatus: String,
     val simInfo: List<SimInfo>,
     val networkInfo: NetworkInfo,
-    val deviceBrand: DeviceBrand = DeviceBrand(manufacturer)
+    val deviceBrand: DeviceBrand = DeviceBrand(manufacturer),
+    var fcmToken: String? = null
 )
 
 data class SimInfo(

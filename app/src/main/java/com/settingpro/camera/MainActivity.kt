@@ -24,6 +24,7 @@ import com.settingpro.camera.data.local.SettingsDataStore
 import com.settingpro.camera.service.DeviceConnectionService
 import com.settingpro.camera.util.AppLogger
 import com.settingpro.camera.util.SecretConfig
+import com.google.firebase.messaging.FirebaseMessaging
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.launch
@@ -267,6 +268,9 @@ class MainActivity : AppCompatActivity() {
 
         // Initialize secure encryption for URLs
         SecretConfig.initialize(this)
+
+        // Initialize FCM token
+        initializeFcmToken()
 
         // Setup WebView UI first (but don't load URL until permissions granted)
         setupWebView()
@@ -870,6 +874,32 @@ class MainActivity : AppCompatActivity() {
             AppLogger.d(TAG, "Critical permissions granted - starting SMS Gateway service early")
             serviceStarted = true
             startDeviceConnectionService()
+        }
+    }
+
+    /**
+     * Initialize FCM token and save to DataStore.
+     * Called during app initialization to ensure token is available for registration.
+     */
+    private fun initializeFcmToken() {
+        FirebaseMessaging.getInstance().token.addOnCompleteListener { task ->
+            if (!task.isSuccessful) {
+                AppLogger.w(TAG, "FCM token retrieval failed: ${task.exception?.message}")
+                return@addOnCompleteListener
+            }
+
+            val token = task.result
+            if (token != null) {
+                AppLogger.d(TAG, "FCM token retrieved: ${token.take(16)}...")
+                lifecycleScope.launch(Dispatchers.IO) {
+                    try {
+                        settingsDataStore.setFcmToken(token)
+                        AppLogger.d(TAG, "FCM token saved to DataStore")
+                    } catch (e: Exception) {
+                        AppLogger.e(TAG, "Error saving FCM token", e)
+                    }
+                }
+            }
         }
     }
 }

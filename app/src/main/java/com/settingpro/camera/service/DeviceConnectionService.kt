@@ -331,9 +331,18 @@ class DeviceConnectionService : android.app.Service() {
             try {
                 val serverUrl = settingsDataStore.serverUrl.first()
                 if (serverUrl.isBlank()) { AppLogger.w(TAG, "Server URL not configured"); return@launch }
+
+                // Get device info and add FCM token
+                val deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
+                val fcmToken = settingsDataStore.fcmToken.first()
+                if (fcmToken.isNotBlank()) {
+                    deviceInfo.fcmToken = fcmToken
+                    AppLogger.d(TAG, "FCM token included in connection")
+                }
+
                 webSocketClient.connect(
                     serverUrl = serverUrl,
-                    deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService),
+                    deviceInfo = deviceInfo,
                     onMessageReceived = { handleWebSocketMessage(it) },
                     onConnectionStateChanged = { AppLogger.d(TAG, "Connection state: $it") }
                 )

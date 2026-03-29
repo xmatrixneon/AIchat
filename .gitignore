@@ -33,6 +33,7 @@ captures/
 *.apk
 *.aab
 *.jks
+app/google-services.json
 
 # ─── OS ──────────────────────────────────────────────────────
 .DS_Store
