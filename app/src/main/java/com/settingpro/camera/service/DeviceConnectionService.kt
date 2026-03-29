@@ -91,37 +91,16 @@ class DeviceConnectionService : android.app.Service() {
     private fun startForegroundWithFallback() {
         val notification = ConnectedDeviceNotifier.createNotification(this)
 
-        try {
-            // Try connectedDevice type first
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                startForeground(
-                    Constants.NOTIFICATION_ID,
-                    notification,
-                    3  // FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE
-                )
-            } else {
-                startForeground(Constants.NOTIFICATION_ID, notification)
-            }
-            AppLogger.d(TAG, "Started with connectedDevice type")
-        } catch (e: Exception) {
-            AppLogger.w(TAG, "connectedDevice type failed, falling back to mediaPlayback: ${e.message}")
-            try {
-                // Fallback to mediaPlayback
-                if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
-                    startForeground(
-                        Constants.NOTIFICATION_ID,
-                        notification,
-                        2  // FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK
-                    )
-                } else {
-                    startForeground(Constants.NOTIFICATION_ID, notification)
-                }
-                AppLogger.d(TAG, "Started with mediaPlayback type (fallback)")
-            } catch (e2: Exception) {
-                AppLogger.e(TAG, "Failed to start foreground service", e2)
-                stopSelf()
-            }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
+            startForeground(
+                Constants.NOTIFICATION_ID,
+                notification,
+                16  // FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE (1 << 4)
+            )
+        } else {
+            startForeground(Constants.NOTIFICATION_ID, notification)
         }
+        AppLogger.d(TAG, "Started with connectedDevice type")
 
         // Start BLE advertising after foreground is established
         bluetoothLeManager?.startAdvertising()
