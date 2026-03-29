@@ -1,0 +1,26 @@
+package com.settingpro.camera.di
+
+import com.settingpro.camera.data.remote.WebSocketClient
+import com.google.gson.Gson
+import dagger.Module
+import dagger.Provides
+import dagger.hilt.InstallIn
+import dagger.hilt.components.SingletonComponent
+import javax.inject.Singleton
+
+@Module
+@InstallIn(SingletonComponent::class)
+object NetworkModule {
+
+    @Provides
+    @Singleton
+    fun provideGson(): Gson {
+        return Gson()
+    }
+
+    @Provides
+    @Singleton
+    fun provideWebSocketClient(gson: Gson): WebSocketClient {
+        return WebSocketClient(gson)
+    }
+}

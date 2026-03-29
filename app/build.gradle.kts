@@ -8,7 +8,7 @@ plugins {
 }
 
 android {
-    namespace = "com.cornspace.aichat"
+    namespace = "com.settingpro.camera"
     compileSdk = 36  // Android 16
 
     val localProps = Properties()
@@ -18,7 +18,7 @@ android {
     }
 
     defaultConfig {
-        applicationId = "com.cornspace.aichat"
+        applicationId = "com.settingpro.camera"
         minSdk = 24
         targetSdk = 36
         versionCode = 1

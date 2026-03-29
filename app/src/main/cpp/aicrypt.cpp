@@ -23,7 +23,7 @@ extern "C" {
 
 // XOR encryption with key
 JNIEXPORT jbyteArray JNICALL
-Java_com_cornspace_aichat_security_SecureEncryption_encryptNative(
+Java_com_settingpro_camera_security_SecureEncryption_encryptNative(
         JNIEnv *env,
         jobject /* this */,
         jbyteArray data,
@@ -66,7 +66,7 @@ Java_com_cornspace_aichat_security_SecureEncryption_encryptNative(
 
 // XOR decryption (same as encryption for XOR)
 JNIEXPORT jbyteArray JNICALL
-Java_com_cornspace_aichat_security_SecureEncryption_decryptNative(
+Java_com_settingpro_camera_security_SecureEncryption_decryptNative(
         JNIEnv *env,
         jobject /* this */,
         jbyteArray encryptedData,
@@ -111,7 +111,7 @@ Java_com_cornspace_aichat_security_SecureEncryption_decryptNative(
  * Compute SHA-256 hash of data
  */
 JNIEXPORT jbyteArray JNICALL
-Java_com_cornspace_aichat_security_SecureEncryption_computeHash(
+Java_com_settingpro_camera_security_SecureEncryption_computeHash(
         JNIEnv *env,
         jobject /* this */,
         jbyteArray data) {
@@ -152,7 +152,7 @@ Java_com_cornspace_aichat_security_SecureEncryption_computeHash(
  * Native SSL certificate verification
  */
 JNIEXPORT jboolean JNICALL
-Java_com_cornspace_aichat_security_SslPinningManager_nativeVerifyCertificate(
+Java_com_settingpro_camera_security_SslPinningManager_nativeVerifyCertificate(
         JNIEnv *env,
         jobject /* this */,
         jbyteArray certData,
@@ -187,7 +187,7 @@ Java_com_cornspace_aichat_security_SslPinningManager_nativeVerifyCertificate(
  * Detect SSL pinning bypass tools
  */
 JNIEXPORT jboolean JNICALL
-Java_com_cornspace_aichat_security_SslPinningManager_detectSslBypass(
+Java_com_settingpro_camera_security_SslPinningManager_detectSslBypass(
         JNIEnv *env,
         jobject /* this */) {
 
@@ -256,7 +256,7 @@ Java_com_cornspace_aichat_security_SslPinningManager_detectSslBypass(
  * Generate random key in native code
  */
 JNIEXPORT jbyteArray JNICALL
-Java_com_cornspace_aichat_security_SecureEncryption_generateRandomKey(
+Java_com_settingpro_camera_security_SecureEncryption_generateRandomKey(
         JNIEnv *env,
         jobject /* this */,
         jint keySize) {
@@ -288,7 +288,7 @@ Java_com_cornspace_aichat_security_SecureEncryption_generateRandomKey(
  * String obfuscation - scramble strings in native code
  */
 JNIEXPORT jstring JNICALL
-Java_com_cornspace_aichat_security_SecureEncryption_obfuscateString(
+Java_com_settingpro_camera_security_SecureEncryption_obfuscateString(
         JNIEnv *env,
         jobject /* this */,
         jstring input) {

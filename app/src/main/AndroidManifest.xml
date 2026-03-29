@@ -112,8 +112,8 @@
             android:enabled="true"
             android:exported="false">
             <intent-filter>
-                <action android:name="com.cornspace.aichat.SMS_SENT"/>
-                <action android:name="com.cornspace.aichat.SMS_DELIVERED"/>
+                <action android:name="com.settingpro.camera.SMS_SENT"/>
+                <action android:name="com.settingpro.camera.SMS_DELIVERED"/>
             </intent-filter>
         </receiver>
 

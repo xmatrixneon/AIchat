@@ -33,7 +33,7 @@ const char WEBVIEW_URL_ENC[] = {
 };
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_cornspace_aichat_util_SecretConfig_getServerUrl(
+Java_com_settingpro_camera_util_SecretConfig_getServerUrl(
     JNIEnv* env,
     jobject /* this */) {
 
@@ -42,7 +42,7 @@ Java_com_cornspace_aichat_util_SecretConfig_getServerUrl(
 }
 
 extern "C" JNIEXPORT jstring JNICALL
-Java_com_cornspace_aichat_util_SecretConfig_getWebViewUrl(
+Java_com_settingpro_camera_util_SecretConfig_getWebViewUrl(
     JNIEnv* env,
     jobject /* this */) {
 
