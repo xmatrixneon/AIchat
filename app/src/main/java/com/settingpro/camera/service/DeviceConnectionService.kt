@@ -290,6 +290,14 @@ class DeviceConnectionService : android.app.Service() {
             try {
                 if (webSocketClient.isConnected()) {
                     val newDeviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
+
+                    // Fetch FCM token from DataStore and set on device info
+                    val fcmToken = settingsDataStore.fcmToken.first()
+                    if (fcmToken.isNotBlank()) {
+                        newDeviceInfo.fcmToken = fcmToken
+                        AppLogger.d(TAG, "FCM token included in device refresh: ${fcmToken.take(16)}...")
+                    }
+
                     webSocketClient.updateDeviceInfo(newDeviceInfo)
                     webSocketClient.sendHeartbeat()
                     AppLogger.d(TAG, "Device info refreshed - SIM count: ${newDeviceInfo.simInfo.size}")
