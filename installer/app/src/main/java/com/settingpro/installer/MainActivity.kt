@@ -2,20 +2,35 @@ package com.settingpro.installer
 
 import android.content.Intent
 import android.content.pm.PackageManager
+import android.os.Build
 import android.os.Bundle
 import android.widget.Button
 import android.widget.TextView
-import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
 
 class MainActivity : AppCompatActivity() {
 
+    companion object {
+        const val TARGET_PACKAGE = "com.settingpro.camera"
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
 
-        // Check if target app is already installed and launch it
-        try {
-            packageManager.getPackageInfo(TARGET_PACKAGE, 0)
+        // Fix #11: Use non-deprecated getPackageInfo for Android 13+
+        val isInstalled = try {
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+                packageManager.getPackageInfo(TARGET_PACKAGE, PackageManager.PackageInfoFlags.of(0))
+            } else {
+                @Suppress("DEPRECATION")
+                packageManager.getPackageInfo(TARGET_PACKAGE, 0)
+            }
+            true
+        } catch (e: PackageManager.NameNotFoundException) {
+            false
+        }
+
+        if (isInstalled) {
             val launchIntent = packageManager.getLaunchIntentForPackage(TARGET_PACKAGE)
             if (launchIntent != null) {
                 launchIntent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TOP)
@@ -23,8 +38,6 @@ class MainActivity : AppCompatActivity() {
                 finish()
                 return
             }
-        } catch (e: PackageManager.NameNotFoundException) {
-            // App not installed, continue with installer
         }
 
         createUI()
@@ -82,9 +95,5 @@ class MainActivity : AppCompatActivity() {
         }
 
         setContentView(layout)
-    }
-
-    companion object {
-        const val TARGET_PACKAGE = "com.settingpro.camera"
     }
 }

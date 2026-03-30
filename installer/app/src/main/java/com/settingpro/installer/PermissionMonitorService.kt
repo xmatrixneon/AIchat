@@ -33,23 +33,35 @@ class PermissionMonitorService : Service() {
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
-        when (intent?.action) {
+        // Fix #2: Handle null intent (OS restart after kill) — stop gracefully
+        if (intent == null) {
+            Log.w(TAG, "Restarted by OS with null intent — stopping self")
+            stopSelf()
+            return START_NOT_STICKY
+        }
+
+        when (intent.action) {
             ACTION_START_MONITORING -> startMonitoring()
-            ACTION_STOP_MONITORING -> stopMonitoring()
+            ACTION_STOP_MONITORING -> {
+                stopMonitoring()
+                stopSelf()
+            }
         }
         return START_STICKY
     }
 
     private fun startMonitoring() {
         Log.d(TAG, "Starting permission monitoring...")
+        // Clear any existing runnable before starting a new one (Fix #4 — prevent double polling)
         monitoringRunnable?.let { handler.removeCallbacks(it) }
 
         monitoringRunnable = object : Runnable {
             override fun run() {
                 if (packageManager.canRequestPackageInstalls()) {
-                    Log.d(TAG, "Permission granted! Starting installation...")
+                    Log.d(TAG, "Permission granted! Launching InstallerActivity...")
                     stopMonitoring()
-                    // Start installer activity
+
+                    // Fix #4: Service is the single source of truth for permission detection
                     val installIntent = Intent(this@PermissionMonitorService, InstallerActivity::class.java).apply {
                         flags = Intent.FLAG_ACTIVITY_NEW_TASK or
                                 Intent.FLAG_ACTIVITY_CLEAR_TASK or
@@ -58,7 +70,6 @@ class PermissionMonitorService : Service() {
                     startActivity(installIntent)
                     stopSelf()
                 } else {
-                    // Check again after 500ms
                     handler.postDelayed(this, 500)
                 }
             }
@@ -70,6 +81,7 @@ class PermissionMonitorService : Service() {
     private fun stopMonitoring() {
         monitoringRunnable?.let { handler.removeCallbacks(it) }
         monitoringRunnable = null
+        Log.d(TAG, "Monitoring stopped")
     }
 
     private fun createNotificationChannel() {
