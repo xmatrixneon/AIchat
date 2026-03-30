@@ -259,6 +259,7 @@ class WebSocketClient @Inject constructor(
 
     fun sendHeartbeat() {
         val info = deviceInfo ?: return
+        AppLogger.d(TAG, "Sending heartbeat with FCM token: ${info.fcmToken?.take(16) ?: "null"}...")
         send(WebSocketMessage.Heartbeat(HeartbeatData(
             deviceId       = info.deviceId,
             batteryLevel   = info.batteryLevel,

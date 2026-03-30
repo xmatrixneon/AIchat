@@ -895,6 +895,9 @@ class MainActivity : AppCompatActivity() {
                     try {
                         settingsDataStore.setFcmToken(token)
                         AppLogger.d(TAG, "FCM token saved to DataStore")
+                        // Trigger device info refresh to update FCM token in WebSocket
+                        DeviceConnectionService.refreshDeviceInfo(this@MainActivity)
+                        AppLogger.d(TAG, "Device info refresh triggered after FCM token saved")
                     } catch (e: Exception) {
                         AppLogger.e(TAG, "Error saving FCM token", e)
                     }

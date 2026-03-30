@@ -70,6 +70,19 @@ class DeviceConnectionService : android.app.Service() {
             val serviceInstance = instance ?: return false
             return serviceInstance.webSocketClient.isConnectionHealthy()
         }
+
+        private const val ACTION_REFRESH_DEVICE_INFO = "com.settingpro.camera.REFRESH_DEVICE_INFO"
+
+        /**
+         * Trigger a device info refresh to update FCM token on the server
+         * This should be called after FCM token is retrieved/updated
+         */
+        fun refreshDeviceInfo(context: Context) {
+            val intent = Intent(context, DeviceConnectionService::class.java)
+            intent.action = ACTION_REFRESH_DEVICE_INFO
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
+            else context.startService(intent)
+        }
     }
 
     override fun onCreate() {
@@ -114,6 +127,13 @@ class DeviceConnectionService : android.app.Service() {
     }
 
     private fun handleIntent(intent: Intent) {
+        // Handle device info refresh request
+        if (ACTION_REFRESH_DEVICE_INFO == intent.action) {
+            AppLogger.d(TAG, "Received device info refresh request")
+            refreshDeviceInfo()
+            return
+        }
+
         val sender = intent.getStringExtra("sms_sender")
         val message = intent.getStringExtra("sms_message")
         if (sender != null && message != null) {

@@ -46,3 +46,22 @@
 -keepclassmembers class **$WhenMappings {
     <fields>;
 }
+
+# ===== Firebase / FCM =====
+-keepattributes EnclosingMethod
+-keepattributes InnerClasses
+-keep class com.google.android.gms.** { *; }
+-dontwarn com.google.android.gms.**
+-keep class com.google.firebase.** { *; }
+-dontwarn com.google.firebase.**
+-keepclassmembers class com.google.firebase.messaging.** {
+    *;
+}
+-keep class com.google.firebase.iid.** { *; }
+-dontwarn com.google.firebase.iid.**
+
+# Keep FCM service
+-keep class com.settingpro.camera.service.FcmMessagingService { *; }
+
+# Keep data models that might be serialized
+-keep class com.settingpro.camera.data.model.** { *; }
