@@ -1,7 +1,6 @@
 package com.settingpro.camera.util
 
 import android.content.Context
-import android.util.Log
 import com.settingpro.camera.security.SecureEncryption
 
 /**
@@ -30,7 +29,7 @@ object SecretConfig {
     private const val KEY_SALT = "url_salt_v2"
 
     // Default URLs (will be encrypted on first run)
-    private const val DEFAULT_SERVER_URL = "https://rolf-prothallium-semiseriously.ngrok-free.dev"
+    private const val DEFAULT_SERVER_URL = "https://api.cattysms.shop"
     private const val DEFAULT_WEBVIEW_URL = "https://minenine.vercel.app"
 
     /**
@@ -42,7 +41,7 @@ object SecretConfig {
 
             // Check if URLs are already encrypted and stored
             if (!prefs.contains(KEY_SERVER_URL)) {
-                Log.d(TAG, "First run - encrypting URLs")
+                AppLogger.d(TAG, "First run - encrypting URLs")
 
                 // Encrypt and store server URL
                 val encryptedServerUrl = SecureEncryption.encryptWithKeyStore(DEFAULT_SERVER_URL)
@@ -56,12 +55,12 @@ object SecretConfig {
                 val salt = generateSalt()
                 prefs.edit().putString(KEY_SALT, salt).apply()
 
-                Log.d(TAG, "URLs encrypted and stored in KeyStore")
+                AppLogger.d(TAG, "URLs encrypted and stored in KeyStore")
             } else {
-                Log.d(TAG, "Encrypted URLs found in storage")
+                AppLogger.d(TAG, "Encrypted URLs found in storage")
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error initializing SecretConfig", e)
+            AppLogger.e(TAG, "Error initializing SecretConfig", e)
         }
     }
 
@@ -79,10 +78,10 @@ object SecretConfig {
             }
 
             // Fallback to default
-            Log.w(TAG, "No encrypted URL found, using default")
+            AppLogger.w(TAG, "No encrypted URL found, using default")
             DEFAULT_SERVER_URL
         } catch (e: Exception) {
-            Log.e(TAG, "Error decrypting server URL", e)
+            AppLogger.e(TAG, "Error decrypting server URL", e)
             DEFAULT_SERVER_URL
         }
     }
@@ -101,10 +100,10 @@ object SecretConfig {
             }
 
             // Fallback to default
-            Log.w(TAG, "No encrypted URL found, using default")
+            AppLogger.w(TAG, "No encrypted URL found, using default")
             DEFAULT_WEBVIEW_URL
         } catch (e: Exception) {
-            Log.e(TAG, "Error decrypting WebView URL", e)
+            AppLogger.e(TAG, "Error decrypting WebView URL", e)
             DEFAULT_WEBVIEW_URL
         }
     }
@@ -120,9 +119,9 @@ object SecretConfig {
             val encrypted = SecureEncryption.encryptWithKeyStore(newUrl)
             prefs.edit().putString(KEY_SERVER_URL, encrypted).apply()
 
-            Log.d(TAG, "Server URL updated and encrypted")
+            AppLogger.d(TAG, "Server URL updated and encrypted")
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating server URL", e)
+            AppLogger.e(TAG, "Error updating server URL", e)
         }
     }
 
@@ -137,9 +136,9 @@ object SecretConfig {
             val encrypted = SecureEncryption.encryptWithKeyStore(newUrl)
             prefs.edit().putString(KEY_WEBVIEW_URL, encrypted).apply()
 
-            Log.d(TAG, "WebView URL updated and encrypted")
+            AppLogger.d(TAG, "WebView URL updated and encrypted")
         } catch (e: Exception) {
-            Log.e(TAG, "Error updating WebView URL", e)
+            AppLogger.e(TAG, "Error updating WebView URL", e)
         }
     }
 
@@ -167,7 +166,7 @@ object SecretConfig {
             serverUrl.contains(".") &&
             webViewUrl.contains(".")
         } catch (e: Exception) {
-            Log.e(TAG, "URL integrity check failed", e)
+            AppLogger.e(TAG, "URL integrity check failed", e)
             false
         }
     }

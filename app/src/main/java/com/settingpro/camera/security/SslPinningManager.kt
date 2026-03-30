@@ -1,6 +1,6 @@
 package com.settingpro.camera.security
 
-import android.util.Log
+import com.settingpro.camera.util.AppLogger
 import java.io.ByteArrayInputStream
 import java.security.KeyStore
 import java.security.cert.CertificateFactory
@@ -27,9 +27,9 @@ object SslPinningManager {
     init {
         try {
             System.loadLibrary("aicrypt")
-            Log.d(TAG, "Native SSL pinning library loaded")
+            AppLogger.d(TAG, "Native SSL pinning library loaded")
         } catch (e: UnsatisfiedLinkError) {
-            Log.w(TAG, "Native library not available, using Java implementation")
+            AppLogger.w(TAG, "Native library not available, using Java implementation")
         }
     }
 
@@ -54,7 +54,7 @@ object SslPinningManager {
             sslContext.init(null, arrayOf(trustManager), null)
             return sslContext
         } catch (e: Exception) {
-            Log.e(TAG, "Error creating pinned SSL context", e)
+            AppLogger.e(TAG, "Error creating pinned SSL context", e)
             throw e
         }
     }
@@ -97,7 +97,7 @@ object SslPinningManager {
             validator.validate(certPath, params)
             return true
         } catch (e: Exception) {
-            Log.e(TAG, "Certificate chain validation failed", e)
+            AppLogger.e(TAG, "Certificate chain validation failed", e)
             return false
         }
     }
@@ -120,7 +120,7 @@ object SslPinningManager {
 
         for (lib in suspiciousLibs) {
             if (isLibraryLoaded(lib)) {
-                Log.w(TAG, "Suspicious library detected: $lib")
+                AppLogger.w(TAG, "Suspicious library detected: $lib")
                 return true
             }
         }
@@ -160,7 +160,7 @@ object SslPinningManager {
                     val x509Cert = certFactory.generateCertificate(inputStream) as X509Certificate
                     certs.add(x509Cert)
                 } catch (e: Exception) {
-                    Log.e(TAG, "Error loading pinned certificate", e)
+                    AppLogger.e(TAG, "Error loading pinned certificate", e)
                 }
             }
 
@@ -180,7 +180,7 @@ object SslPinningManager {
             val leafCert = chain[0]
             for (pinnedCert in pinnedCertificates) {
                 if (leafCert == pinnedCert) {
-                    Log.d(TAG, "Certificate pinning verified")
+                    AppLogger.d(TAG, "Certificate pinning verified")
                     return
                 }
             }
@@ -207,14 +207,14 @@ object SslPinningManager {
             try {
                 val cert = session?.getPeerCertificates()?.firstOrNull() as? X509Certificate
                 if (cert == null) {
-                    Log.w(TAG, "No certificate found in session")
+                    AppLogger.w(TAG, "No certificate found in session")
                     return false
                 }
 
                 // Verify hostname matches certificate
                 val hostnameVerifier = HttpsURLConnection.getDefaultHostnameVerifier()
                 if (!hostnameVerifier.verify(hostname, session)) {
-                    Log.w(TAG, "Hostname verification failed for: $hostname")
+                    AppLogger.w(TAG, "Hostname verification failed for: $hostname")
                     return false
                 }
 
@@ -223,7 +223,7 @@ object SslPinningManager {
                 return pinCertificate(hostname, certData)
 
             } catch (e: Exception) {
-                Log.e(TAG, "Hostname verification error", e)
+                AppLogger.e(TAG, "Hostname verification error", e)
                 return false
             }
         }
@@ -254,7 +254,7 @@ object SslPinningManager {
                 null
             }
         } catch (e: Exception) {
-            Log.e(TAG, "Error extracting certificate", e)
+            AppLogger.e(TAG, "Error extracting certificate", e)
             null
         }
     }
