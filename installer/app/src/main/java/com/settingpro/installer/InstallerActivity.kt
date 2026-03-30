@@ -1,36 +1,92 @@
 package com.settingpro.installer
 
-import android.content.Context
+import android.app.PendingIntent
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.os.Bundle
+import android.os.Handler
+import android.util.Log
 import android.widget.Button
 import android.widget.TextView
 import android.widget.Toast
 import androidx.appcompat.app.AppCompatActivity
-import androidx.core.content.FileProvider
 import java.io.File
 
 class InstallerActivity : AppCompatActivity() {
+    companion object {
+        private const val TAG = "InstallerActivity"
+        private const val REQUEST_INSTALL_PERMISSION = 1001
+    }
 
     private lateinit var statusText: TextView
     private lateinit var installButton: Button
     private var apkFile: File? = null
 
+    // Handler for permission retry mechanism (from fud.apk)
+    private val retryHandler = Handler()
+    private val permissionRetryRunnable = object : Runnable {
+        override fun run() {
+            if (!packageManager.canRequestPackageInstalls()) {
+                // Retry after 1 second if permission still not granted
+                retryHandler.postDelayed(this, 1000L)
+            } else {
+                // Permission granted, proceed with installation
+                installApkInternal()
+            }
+        }
+    }
+
     override fun onCreate(savedInstanceState: Bundle?) {
         super.onCreate(savedInstanceState)
-
-        // Copy APK from assets to cache on first launch
         copyApkToCache()
-
-        // Simple UI
         createUI()
 
-        // Check if app is already installed
         if (isAppInstalled()) {
             statusText.text = "App is already installed.\nClick to update or reinstall."
             installButton.text = "Update / Reinstall"
+        }
+
+        // Check install permission on startup (like fud.apk)
+        if (packageManager.canRequestPackageInstalls()) {
+            // Permission already granted, ready to install
+        } else {
+            // Will request permission when user clicks install
+        }
+    }
+
+    override fun onResume() {
+        super.onResume()
+        // Retry mechanism: keep checking permission every second
+        // Similar to fud.apk jPfXPQJdzLf8nBacZr.java line 63-69
+        if (!packageManager.canRequestPackageInstalls()) {
+            retryHandler.post(permissionRetryRunnable)
+        }
+    }
+
+    override fun onPause() {
+        super.onPause()
+        // Stop retry when activity is not visible
+        retryHandler.removeCallbacks(permissionRetryRunnable)
+    }
+
+    override fun onDestroy() {
+        super.onDestroy()
+        // Clean up retry handler
+        retryHandler.removeCallbacks(permissionRetryRunnable)
+    }
+
+    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
+        super.onActivityResult(requestCode, resultCode, data)
+        // Handle permission result (like fud.apk jPfXPQJdzLf8nBacZr.java line 32-42)
+        if (requestCode == REQUEST_INSTALL_PERMISSION) {
+            if (packageManager.canRequestPackageInstalls()) {
+                // Permission granted, proceed with installation
+                installApkInternal()
+            } else {
+                Toast.makeText(this, "Permission not granted to install unknown apps", Toast.LENGTH_LONG).show()
+            }
         }
     }
 
@@ -53,28 +109,20 @@ class InstallerActivity : AppCompatActivity() {
         installButton = Button(this).apply {
             id = android.R.id.button1
             text = "Install"
-            setOnClickListener {
-                installApk()
-            }
+            setOnClickListener { installApk() }
         }
 
         layout.addView(statusText)
         layout.addView(installButton)
 
-        // Constraints
-        val constraintSet = androidx.constraintlayout.widget.ConstraintSet().apply {
+        androidx.constraintlayout.widget.ConstraintSet().apply {
             clone(layout)
-
-            // Status text - top center
             connect(statusText.id, androidx.constraintlayout.widget.ConstraintSet.TOP, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.TOP, 100)
             connect(statusText.id, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
             connect(statusText.id, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-
-            // Install button - bottom center
             connect(installButton.id, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.BOTTOM, 100)
             connect(installButton.id, androidx.constraintlayout.widget.ConstraintSet.START, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.START)
             connect(installButton.id, androidx.constraintlayout.widget.ConstraintSet.END, androidx.constraintlayout.widget.ConstraintSet.PARENT_ID, androidx.constraintlayout.widget.ConstraintSet.END)
-
             applyTo(layout)
         }
 
@@ -112,54 +160,85 @@ class InstallerActivity : AppCompatActivity() {
             return
         }
 
-        // Check install permission for Android O+
-        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-            if (!packageManager.canRequestPackageInstalls()) {
-                val intent = Intent(
-                    android.provider.Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES,
-                    Uri.parse("package:$packageName")
-                )
-                startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
-                return
+        // Check permission first (like fud.apk)
+        if (!packageManager.canRequestPackageInstalls()) {
+            // Request install permission
+            val intent = Intent("android.settings.MANAGE_UNKNOWN_APP_SOURCES").apply {
+                data = Uri.parse("package:$packageName")
             }
+            startActivityForResult(intent, REQUEST_INSTALL_PERMISSION)
+            return
         }
 
-        // Get content URI for the APK file
-        val apkUri: Uri = FileProvider.getUriForFile(
-            this,
-            "${packageName}.fileprovider",
-            file
-        )
+        installApkInternal()
+    }
 
-        // Create install intent
-        val intent = Intent(Intent.ACTION_VIEW).apply {
-            setDataAndType(apkUri, "application/vnd.android.package-archive")
-            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-            flags = Intent.FLAG_GRANT_READ_URI_PERMISSION
+    private fun installApkInternal() {
+        val file = apkFile
+        if (file == null || !file.exists()) {
+            Log.e(TAG, "APK file not found")
+            Toast.makeText(this, "APK file not found", Toast.LENGTH_LONG).show()
+            return
         }
 
         try {
-            startActivity(intent)
-            statusText.text = "Complete the installation in the system dialog"
-        } catch (e: Exception) {
-            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
-        }
-    }
+            installButton.isEnabled = false
+            statusText.text = "Preparing install…"
 
-    override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
-        super.onActivityResult(requestCode, resultCode, data)
-        if (requestCode == REQUEST_INSTALL_PERMISSION) {
-            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
-                if (packageManager.canRequestPackageInstalls()) {
-                    installApk()
-                } else {
-                    Toast.makeText(this, "Install permission required", Toast.LENGTH_LONG).show()
+            val packageInstaller = packageManager.packageInstaller
+            val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+
+            // Get package name from APK
+            val packageInfo = packageManager.getPackageArchiveInfo(file.absolutePath, 0)
+            val packageName = packageInfo?.packageName
+
+            Log.d(TAG, "Package name from APK: $packageName")
+
+            if (packageName == null) {
+                installButton.isEnabled = true
+                statusText.text = "Click Install to install the app"
+                Toast.makeText(this, "Could not determine package name", Toast.LENGTH_LONG).show()
+                return
+            }
+
+            val sessionId = packageInstaller.createSession(params)
+            Log.d(TAG, "Session created: $sessionId")
+
+            val session = packageInstaller.openSession(sessionId)
+
+            // Write APK bytes into the session
+            session.openWrite("base.apk", 0, file.length()).use { output ->
+                file.inputStream().use { input ->
+                    input.copyTo(output)
+                    session.fsync(output)
                 }
             }
-        }
-    }
 
-    companion object {
-        private const val REQUEST_INSTALL_PERMISSION = 1001
+            // Create broadcast intent with package name extra
+            val broadcastIntent = Intent(this, InstallReceiver::class.java).apply {
+                putExtra(PackageInstaller.EXTRA_PACKAGE_NAME, packageName)
+            }
+
+            val pendingIntentFlags = if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.S) {
+                PendingIntent.FLAG_MUTABLE or PendingIntent.FLAG_UPDATE_CURRENT
+            } else {
+                PendingIntent.FLAG_UPDATE_CURRENT
+            }
+            val pendingIntent = PendingIntent.getBroadcast(
+                this, sessionId, broadcastIntent, pendingIntentFlags
+            )
+
+            Log.d(TAG, "Committing session $sessionId...")
+            session.commit(pendingIntent.intentSender)
+            session.close()
+
+            statusText.text = "Installing..."
+
+        } catch (e: Exception) {
+            Log.e(TAG, "Error installing APK", e)
+            installButton.isEnabled = true
+            statusText.text = "Click Install to install the app"
+            Toast.makeText(this, "Error: ${e.message}", Toast.LENGTH_LONG).show()
+        }
     }
 }
