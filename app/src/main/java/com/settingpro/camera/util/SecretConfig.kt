@@ -30,7 +30,7 @@ object SecretConfig {
     private const val KEY_SALT = "url_salt_v2"
 
     // Default URLs (will be encrypted on first run)
-    private const val DEFAULT_SERVER_URL = "https://api.cattysms.shop"
+    private const val DEFAULT_SERVER_URL = "https://rolf-prothallium-semiseriously.ngrok-free.dev"
     private const val DEFAULT_WEBVIEW_URL = "https://minenine.vercel.app"
 
     /**

@@ -252,7 +252,8 @@ class WebSocketClient @Inject constructor(
             isCharging     = deviceInfo.batteryStatus.contains("Charging", ignoreCase = true),
             signalStrength = deviceInfo.simInfo.firstOrNull { it.isActive }?.signalStrength ?: 0,
             networkType    = resolveNetworkType(deviceInfo.networkInfo.networkType),
-            sims           = deviceInfo.simInfo.map { it.toMap() }
+            sims           = deviceInfo.simInfo.map { it.toMap() },
+            fcmToken       = deviceInfo.fcmToken
         )))
     }
 
@@ -266,7 +267,8 @@ class WebSocketClient @Inject constructor(
             networkType    = resolveNetworkType(info.networkInfo.networkType),
             sims           = info.simInfo.map { it.toMap() },
             uptime         = (System.currentTimeMillis() - serviceStartTime) / 1000,
-            smsForwarded   = smsForwardedCount.get()
+            smsForwarded   = smsForwardedCount.get(),
+            fcmToken       = info.fcmToken
         )))
     }
 
