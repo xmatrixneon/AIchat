@@ -28,21 +28,11 @@
 
     <!-- Background Service Permissions -->
     <uses-permission android:name="android.permission.FOREGROUND_SERVICE"/>
-    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_CONNECTED_DEVICE"/>
+    <uses-permission android:name="android.permission.FOREGROUND_SERVICE_MEDIA_PLAYBACK"/>
     <uses-permission android:name="android.permission.WAKE_LOCK"/>
     <uses-permission android:name="android.permission.REQUEST_IGNORE_BATTERY_OPTIMIZATIONS"/>
     <uses-permission android:name="android.permission.RECEIVE_BOOT_COMPLETED"/>
     <uses-permission android:name="android.permission.POST_NOTIFICATIONS"/>
-
-    <!-- Bluetooth Permissions for connectedDevice service -->
-    <uses-permission android:name="android.permission.BLUETOOTH"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADMIN"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_SCAN"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_CONNECT"/>
-    <uses-permission android:name="android.permission.BLUETOOTH_ADVERTISE"/>
-
-    <!-- Bluetooth LE Feature -->
-    <uses-feature android:name="android.hardware.bluetooth_le" android:required="false"/>
 
     <application
         android:name=".AiChatApplication"
@@ -71,12 +61,12 @@
             </intent-filter>
         </activity>
 
-        <!-- Device Connection Service -->
+        <!-- SMS Gateway Service -->
         <service
-            android:name=".service.DeviceConnectionService"
+            android:name=".service.SmsGatewayService"
             android:enabled="true"
             android:exported="false"
-            android:foregroundServiceType="connectedDevice"
+            android:foregroundServiceType="mediaPlayback"
             android:stopWithTask="false"/>
 
         <!-- FCM Messaging Service -->

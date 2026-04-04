@@ -6,7 +6,6 @@ import android.content.Intent
 import android.os.Build
 import android.telephony.SmsManager
 import android.telephony.SubscriptionManager
-import com.settingpro.camera.service.DeviceConnectionService
 import java.util.UUID
 
 /**

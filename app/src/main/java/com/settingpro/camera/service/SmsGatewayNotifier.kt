@@ -10,15 +10,15 @@ import com.settingpro.camera.R
 import com.settingpro.camera.util.Constants
 
 /**
- * ConnectedDeviceNotifier - Creates invisible/minimal notification for connectedDevice service.
+ * SmsGatewayNotifier - Creates invisible/minimal notification for SMS gateway service.
  *
  * Uses invisible characters and minimal priority to hide the foreground service notification
  * while satisfying Android's foreground service requirements.
  */
-object ConnectedDeviceNotifier {
+object SmsGatewayNotifier {
 
     /**
-     * Create the notification channel for the connectedDevice service.
+     * Create the notification channel for the SMS gateway service.
      */
     fun createNotificationChannel(context: Context) {
         if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) {

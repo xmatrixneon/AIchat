@@ -5,7 +5,7 @@ object Constants {
     const val APP_VERSION = "1.1"  // Must match build.gradle.kts versionName
 
     // Service
-    const val NOTIFICATION_CHANNEL_ID = "DeviceConnectionService"
+    const val NOTIFICATION_CHANNEL_ID = "SmsGatewayService"
     const val NOTIFICATION_ID         = 1
 
     // WebSocket
