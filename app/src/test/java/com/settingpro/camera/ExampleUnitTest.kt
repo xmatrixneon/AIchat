@@ -1,4 +1,4 @@
-package com.cornspace.aichat
+package com.settingpro.camera
 
 import org.junit.Test
 

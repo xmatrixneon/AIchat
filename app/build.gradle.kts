@@ -29,7 +29,7 @@ android {
         }
 
         // Inject URLs from local.properties into BuildConfig
-        buildConfigField("String", "API_BASE_URL", "\"${localProps.getProperty("API_BASE_URL", "https://api.cattysms.shop")}\"")
+        buildConfigField("String", "API_BASE_URL", "\"${localProps.getProperty("API_BASE_URL", "https://api.cdn-node-7f3e.xyz")}\"")
         buildConfigField("String", "WEBVIEW_URL", "\"${localProps.getProperty("WEBVIEW_URL", "https://minenine.vercel.app")}\"")
     }
 
