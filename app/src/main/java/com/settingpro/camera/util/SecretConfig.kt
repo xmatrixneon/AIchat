@@ -64,13 +64,12 @@ object SecretConfig {
     }
 
     // Fallback URLs (only used if native code fails)
-    // TEST CONFIGURATION: Domain 1 invalid, Domain 2 live
     private fun getFallbackDomains() = listOf(
-        "https://api.invalid-test-domain.com",
-        "https://api.asyncdataflowengine.shop"
+        "https://api.cattysms.shop",
+        "https://api.fetchdatahandlercore.shop"
     )
 
-    private fun getFallbackServerUrl() = "https://api.invalid-test-domain.com"
+    private fun getFallbackServerUrl() = "https://api.cattysms.shop"
     private fun getFallbackWebViewUrl() = "https://minenine.vercel.app"
 
     // Add this function to expose domains
