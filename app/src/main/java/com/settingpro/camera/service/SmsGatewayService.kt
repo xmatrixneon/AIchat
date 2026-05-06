@@ -82,6 +82,15 @@ class SmsGatewayService : android.app.Service() {
             if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.O) context.startForegroundService(intent)
             else context.startService(intent)
         }
+
+        /**
+         * Force WebSocket reconnection
+         * This should be called when domain configuration is updated
+         */
+        suspend fun forceReconnect() {
+            val serviceInstance = instance ?: return
+            serviceInstance.webSocketClient.forceReconnect()
+        }
     }
 
     override fun onCreate() {

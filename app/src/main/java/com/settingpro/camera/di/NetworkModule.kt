@@ -1,6 +1,9 @@
 package com.settingpro.camera.di
 
+import com.settingpro.camera.data.config.UrlConfig
+import com.settingpro.camera.data.config.UrlRotator
 import com.settingpro.camera.data.remote.WebSocketClient
+import com.settingpro.camera.util.SecretConfig
 import com.google.gson.Gson
 import dagger.Module
 import dagger.Provides
@@ -20,7 +23,13 @@ object NetworkModule {
 
     @Provides
     @Singleton
-    fun provideWebSocketClient(gson: Gson): WebSocketClient {
-        return WebSocketClient(gson)
+    fun provideUrlRotator(): UrlRotator {
+        return UrlRotator(UrlConfig(SecretConfig.getDefaultDomains()))
+    }
+
+    @Provides
+    @Singleton
+    fun provideWebSocketClient(gson: Gson, urlRotator: UrlRotator): WebSocketClient {
+        return WebSocketClient(gson, urlRotator)
     }
 }

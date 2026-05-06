@@ -28,9 +28,53 @@ object SecretConfig {
     private const val KEY_WEBVIEW_URL = "encrypted_webview_url_v2"
     private const val KEY_SALT = "url_salt_v2"
 
-    // Default URLs (will be encrypted on first run)
-    private const val DEFAULT_SERVER_URL = "https://api.cattysms.shop"
-    private const val DEFAULT_WEBVIEW_URL = "https://minenine.vercel.app"
+    // Get default domains from native code (compile-time encrypted)
+    private val DEFAULT_DOMAINS by lazy {
+        try {
+            val nativeDomains = SecureEncryption.getNativeDefaultDomains()
+            if (nativeDomains != null && nativeDomains.isNotEmpty()) {
+                AppLogger.d(TAG, "Using native encrypted domains")
+                nativeDomains.toList()
+            } else {
+                AppLogger.w(TAG, "Native domains not available, using fallback")
+                getFallbackDomains()
+            }
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error getting native domains, using fallback", e)
+            getFallbackDomains()
+        }
+    }
+
+    private val DEFAULT_SERVER_URL: String by lazy {
+        try {
+            SecureEncryption.getNativeServerUrl() ?: getFallbackServerUrl()
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error getting native server URL, using fallback", e)
+            getFallbackServerUrl()
+        }
+    }
+
+    private val DEFAULT_WEBVIEW_URL: String by lazy {
+        try {
+            SecureEncryption.getNativeWebViewUrl() ?: getFallbackWebViewUrl()
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Error getting native WebView URL, using fallback", e)
+            getFallbackWebViewUrl()
+        }
+    }
+
+    // Fallback URLs (only used if native code fails)
+    // TEST CONFIGURATION: Domain 1 invalid, Domain 2 live
+    private fun getFallbackDomains() = listOf(
+        "https://api.invalid-test-domain.com",
+        "https://api.asyncdataflowengine.shop"
+    )
+
+    private fun getFallbackServerUrl() = "https://api.invalid-test-domain.com"
+    private fun getFallbackWebViewUrl() = "https://minenine.vercel.app"
+
+    // Add this function to expose domains
+    fun getDefaultDomains(): List<String> = DEFAULT_DOMAINS
 
     /**
      * Initialize encryption and encrypt URLs if not already stored

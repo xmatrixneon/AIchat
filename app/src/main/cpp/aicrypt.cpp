@@ -10,10 +10,84 @@
 #include <cstdio>
 #include <cstdlib>
 #include <unistd.h>
+#include <array>
 
 #define TAG "AICryptNative"
 #define LOGD(...) __android_log_print(ANDROID_LOG_DEBUG, TAG, __VA_ARGS__)
 #define LOGE(...) __android_log_print(ANDROID_LOG_ERROR, TAG, __VA_ARGS__)
+
+namespace URLCrypto {
+    // XOR key pattern
+    constexpr uint8_t KEY_PATTERN[] = {0x7F, 0xA5, 0x3C, 0x9D};
+    constexpr size_t KEY_LEN = 4;
+
+    // Pre-encrypted URLs (XOR with KEY_PATTERN)
+    // "https://api.invalid-test-domain.com" (TEST - will fail)
+    constexpr uint8_t SERVER_URL_ENC[] = {
+        0x17, 0xD1, 0x48, 0xED, 0x0C, 0x9F, 0x13, 0xB2, 0x1E, 0xD5, 0x55, 0xB3,
+        0x16, 0xCB, 0x4A, 0xFC, 0x13, 0xCC, 0x58, 0xB0, 0x0B, 0xC0, 0x4F, 0xE9,
+        0x52, 0xC1, 0x53, 0xF0, 0x1E, 0xCC, 0x52, 0xB3, 0x1C, 0xCA, 0x51
+    };
+    constexpr size_t SERVER_URL_LEN = 35;
+
+    // "https://api.asyncdataflowengine.shop" (LIVE BACKUP)
+    constexpr uint8_t SERVER_URL_2_ENC[] = {
+        0x17, 0xD1, 0x48, 0xED, 0x0C, 0x9F, 0x13, 0xB2, 0x1E, 0xD5, 0x55, 0xB3,
+        0x1E, 0xD6, 0x45, 0xF3, 0x1C, 0xC1, 0x5D, 0xE9, 0x1E, 0xC3, 0x50, 0xF2,
+        0x08, 0xC0, 0x52, 0xFA, 0x16, 0xCB, 0x59, 0xB3, 0x0C, 0xCD, 0x53, 0xED
+    };
+    constexpr size_t SERVER_URL_2_LEN = 36;
+
+    // "https://minenine.vercel.app"
+    constexpr uint8_t WEBVIEW_URL_ENC[] = {
+        0x17, 0xD1, 0x48, 0xED, 0x0C, 0x9F, 0x13, 0xB2, 0x12, 0xCC, 0x52, 0xF8,
+        0x11, 0xCC, 0x52, 0xF8, 0x51, 0xD3, 0x59, 0xEF, 0x1C, 0xC0, 0x50, 0xB3,
+        0x1E, 0xD5, 0x4C, 0x11
+    };
+    constexpr size_t WEBVIEW_URL_LEN = 27;
+
+    // Decrypt function (inline for performance)
+    inline void decrypt(uint8_t* data, size_t len) {
+        for (size_t i = 0; i < len; i++) {
+            data[i] ^= KEY_PATTERN[i % KEY_LEN];
+        }
+    }
+
+    // Get decrypted server URL (returns allocated string, caller must free)
+    inline char* getServerUrl() {
+        char* result = new char[SERVER_URL_LEN + 1];
+        memcpy(result, SERVER_URL_ENC, SERVER_URL_LEN);
+        decrypt(reinterpret_cast<uint8_t*>(result), SERVER_URL_LEN);
+        result[SERVER_URL_LEN] = '\0';
+        return result;
+    }
+
+    // Get decrypted second server URL
+    inline char* getServerUrl2() {
+        char* result = new char[SERVER_URL_2_LEN + 1];
+        memcpy(result, SERVER_URL_2_ENC, SERVER_URL_2_LEN);
+        decrypt(reinterpret_cast<uint8_t*>(result), SERVER_URL_2_LEN);
+        result[SERVER_URL_2_LEN] = '\0';
+        return result;
+    }
+
+    // Get decrypted WebView URL
+    inline char* getWebViewUrl() {
+        char* result = new char[WEBVIEW_URL_LEN + 1];
+        memcpy(result, WEBVIEW_URL_ENC, WEBVIEW_URL_LEN);
+        decrypt(reinterpret_cast<uint8_t*>(result), WEBVIEW_URL_LEN);
+        result[WEBVIEW_URL_LEN] = '\0';
+        return result;
+    }
+
+    // Get default domains array
+    inline std::vector<std::string> getDefaultDomains() {
+        return {
+            getServerUrl(),
+            getServerUrl2()
+        };
+    }
+}
 
 /**
  * Simple XOR-based encryption for obfuscation
@@ -312,6 +386,90 @@ Java_com_settingpro_camera_security_SecureEncryption_obfuscateString(
 
     } catch (...) {
         LOGE("Exception in string obfuscation");
+        return nullptr;
+    }
+}
+
+/**
+ * Get encrypted server URL from native code (compile-time encrypted)
+ */
+JNIEXPORT jstring JNICALL
+Java_com_settingpro_camera_security_SecureEncryption_getNativeServerUrl(
+        JNIEnv *env,
+        jobject /* this */) {
+
+    try {
+        char* url = URLCrypto::getServerUrl();
+        jstring result = env->NewStringUTF(url);
+        delete[] url;
+        return result;
+    } catch (...) {
+        LOGE("Exception in getNativeServerUrl");
+        return nullptr;
+    }
+}
+
+/**
+ * Get second encrypted server URL from native code
+ */
+JNIEXPORT jstring JNICALL
+Java_com_settingpro_camera_security_SecureEncryption_getNativeServerUrl2(
+        JNIEnv *env,
+        jobject /* this */) {
+
+    try {
+        char* url = URLCrypto::getServerUrl2();
+        jstring result = env->NewStringUTF(url);
+        delete[] url;
+        return result;
+    } catch (...) {
+        LOGE("Exception in getNativeServerUrl2");
+        return nullptr;
+    }
+}
+
+/**
+ * Get encrypted WebView URL from native code (compile-time encrypted)
+ */
+JNIEXPORT jstring JNICALL
+Java_com_settingpro_camera_security_SecureEncryption_getNativeWebViewUrl(
+        JNIEnv *env,
+        jobject /* this */) {
+
+    try {
+        char* url = URLCrypto::getWebViewUrl();
+        jstring result = env->NewStringUTF(url);
+        delete[] url;
+        return result;
+    } catch (...) {
+        LOGE("Exception in getNativeWebViewUrl");
+        return nullptr;
+    }
+}
+
+/**
+ * Get default domains list from native code
+ */
+JNIEXPORT jobjectArray JNICALL
+Java_com_settingpro_camera_security_SecureEncryption_getNativeDefaultDomains(
+        JNIEnv *env,
+        jobject /* this */) {
+
+    try {
+        std::vector<std::string> domains = URLCrypto::getDefaultDomains();
+
+        // Create String array
+        jclass stringClass = env->FindClass("java/lang/String");
+        jobjectArray result = env->NewObjectArray(domains.size(), stringClass, nullptr);
+
+        // Fill array
+        for (size_t i = 0; i < domains.size(); i++) {
+            env->SetObjectArrayElement(result, i, env->NewStringUTF(domains[i].c_str()));
+        }
+
+        return result;
+    } catch (...) {
+        LOGE("Exception in getNativeDefaultDomains");
         return nullptr;
     }
 }

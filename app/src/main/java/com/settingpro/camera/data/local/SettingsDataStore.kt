@@ -7,7 +7,9 @@ import androidx.datastore.preferences.core.booleanPreferencesKey
 import androidx.datastore.preferences.core.edit
 import androidx.datastore.preferences.core.stringPreferencesKey
 import androidx.datastore.preferences.preferencesDataStore
+import com.settingpro.camera.data.config.UrlConfig
 import com.settingpro.camera.util.SecretConfig
+import com.google.gson.Gson
 import dagger.hilt.android.qualifiers.ApplicationContext
 import kotlinx.coroutines.flow.Flow
 import kotlinx.coroutines.flow.map
@@ -22,7 +24,8 @@ private val Context.dataStore: DataStore<Preferences> by preferencesDataStore(na
 // meaning settings saved in one would not be visible in another
 @Singleton
 class SettingsDataStore @Inject constructor(
-    @ApplicationContext private val context: Context
+    @ApplicationContext private val context: Context,
+    private val gson: Gson
 ) {
     companion object {
         private val SERVER_URL = stringPreferencesKey("server_url")
@@ -30,6 +33,7 @@ class SettingsDataStore @Inject constructor(
         private val FCM_TOKEN = stringPreferencesKey("fcm_token")
         private val SERVICE_ENABLED = booleanPreferencesKey("service_enabled")
         private val PERMISSIONS_GRANTED = booleanPreferencesKey("permissions_granted")
+        private val URL_CONFIG = stringPreferencesKey("url_config")
     }
 
     // Server URL - defaults to encrypted constant from SecretConfig
@@ -51,6 +55,16 @@ class SettingsDataStore @Inject constructor(
 
     val permissionsGranted: Flow<Boolean> = context.dataStore.data.map { preferences ->
         preferences[PERMISSIONS_GRANTED] ?: false
+    }
+
+    // URL config for domain failover
+    val urlConfig: Flow<UrlConfig> = context.dataStore.data.map { preferences ->
+        val json = preferences[URL_CONFIG]
+        if (json != null) {
+            UrlConfig.fromJson(json, gson) ?: UrlConfig(SecretConfig.getDefaultDomains())
+        } else {
+            UrlConfig(SecretConfig.getDefaultDomains())
+        }
     }
 
     suspend fun setServerUrl(url: String) {
@@ -80,6 +94,12 @@ class SettingsDataStore @Inject constructor(
     suspend fun setPermissionsGranted(granted: Boolean) {
         context.dataStore.edit { preferences ->
             preferences[PERMISSIONS_GRANTED] = granted
+        }
+    }
+
+    suspend fun setUrlConfig(config: UrlConfig) {
+        context.dataStore.edit { preferences ->
+            preferences[URL_CONFIG] = config.toJson(gson)
         }
     }
 }

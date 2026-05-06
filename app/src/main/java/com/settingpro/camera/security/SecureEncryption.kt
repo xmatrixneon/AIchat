@@ -65,6 +65,28 @@ object SecureEncryption {
     external fun obfuscateString(input: String): String?
 
     /**
+     * Get encrypted server URL from native code (compile-time encrypted)
+     * This hides the URL from static analysis of the APK
+     */
+    external fun getNativeServerUrl(): String?
+
+    /**
+     * Get second encrypted server URL from native code
+     */
+    external fun getNativeServerUrl2(): String?
+
+    /**
+     * Get encrypted WebView URL from native code (compile-time encrypted)
+     */
+    external fun getNativeWebViewUrl(): String?
+
+    /**
+     * Get default domains list from native code
+     * Returns array of pre-encrypted domain URLs
+     */
+    external fun getNativeDefaultDomains(): Array<String>?
+
+    /**
      * Generate a random encryption key
      */
     fun generateKey(): ByteArray {
