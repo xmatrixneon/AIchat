@@ -29,59 +29,26 @@ object SecretConfig {
     private const val KEY_SALT = "url_salt_v2"
 
     // Get default domains from native code (compile-time encrypted)
+    // FAIL SECURE: App will crash if native encryption is tampered with
     private val DEFAULT_DOMAINS by lazy {
-        try {
-            val nativeDomains = SecureEncryption.getNativeDefaultDomains()
-            if (nativeDomains != null && nativeDomains.isNotEmpty()) {
-                AppLogger.d(TAG, "Using native encrypted domains")
-                nativeDomains.toList()
-            } else {
-                AppLogger.w(TAG, "Native domains not available, using fallback")
-                getFallbackDomains()
-            }
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error getting native domains, using fallback", e)
-            getFallbackDomains()
+        val nativeDomains = SecureEncryption.getNativeDefaultDomains()
+        if (nativeDomains != null && nativeDomains.isNotEmpty()) {
+            AppLogger.d(TAG, "Using native encrypted domains")
+            nativeDomains.toList()
+        } else {
+            AppLogger.e(TAG, "Native encryption failed - app cannot run securely")
+            throw SecurityException("Native encryption required - app integrity check failed")
         }
     }
 
     private val DEFAULT_SERVER_URL: String by lazy {
-        try {
-            SecureEncryption.getNativeServerUrl() ?: getFallbackServerUrl()
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error getting native server URL, using fallback", e)
-            getFallbackServerUrl()
-        }
+        SecureEncryption.getNativeServerUrl()
+            ?: throw SecurityException("Native encryption required - app integrity check failed")
     }
 
     private val DEFAULT_WEBVIEW_URL: String by lazy {
-        try {
-            SecureEncryption.getNativeWebViewUrl() ?: getFallbackWebViewUrl()
-        } catch (e: Exception) {
-            AppLogger.e(TAG, "Error getting native WebView URL, using fallback", e)
-            getFallbackWebViewUrl()
-        }
-    }
-
-    // Fallback URLs (only used if native code fails - OBFUSCATED)
-    // Native encryption is primary; these are emergency fallbacks
-    private fun getFallbackDomains() = decodeDomains()
-
-    private fun getFallbackServerUrl() = decodeUrl("aHR0cHM6Ly9hcGkuY2F0dHlzbXMuc2hvcA==")
-    private fun getFallbackWebViewUrl() = decodeUrl("aHR0cHM6Ly9taW5lbmluZS52ZXJjZWwuYXBw")
-
-    // Base64 decode for obfuscated fallback URLs
-    private fun decodeUrl(encoded: String): String {
-        return String(android.util.Base64.decode(encoded, android.util.Base64.NO_WRAP))
-    }
-
-    // Obfuscated domain list
-    private fun decodeDomains(): List<String> {
-        val encoded = listOf(
-            "aHR0cHM6Ly9hcGkuY2F0dHlzbXMuc2hvcA==",
-            "aHR0cHM6Ly9hcGkuZmV0Y2hkYXRhaGFuZGxlcmNvcmUuc2hvcA=="
-        )
-        return encoded.map { decodeUrl(it) }
+        SecureEncryption.getNativeWebViewUrl()
+            ?: throw SecurityException("Native encryption required - app integrity check failed")
     }
 
     // Add this function to expose domains
